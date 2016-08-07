@@ -1,10 +1,12 @@
 import RPi.GPIO as GPIO
 from lib_nrf24 import NRF24
-import time
 import spidev
-import requests
+
 from twisted.internet import reactor, task, defer
 from twisted.internet.defer import inlineCallbacks, returnValue
+
+import json
+import treq
 
 GPIO.setmode(GPIO.BCM)
 pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE2]]
@@ -12,35 +14,35 @@ pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE1], [0xF0, 
 class NRF24Radio(NRF24):
     def __init__(self):
         super(NRF24Radio, self).__init__(GPIO, spidev.SpiDev()) 
-	#self._radio = NRF24(GPIO, spidev.SpiDev())
-	self.begin(0, 17)
+        #self._radio = NRF24(GPIO, spidev.SpiDev())
+        self.begin(0, 17)
 
-	self.setPayloadSize(32)
-	self.setChannel(0x76)
-	self.setDataRate(NRF24.BR_1MBPS)
-	self.setPALevel(NRF24.PA_MIN)
+        self.setPayloadSize(32)
+        self.setChannel(0x76)
+        self.setDataRate(NRF24.BR_1MBPS)
+        self.setPALevel(NRF24.PA_MIN)
 
-	self.setAutoAck(True)
-	self.enableDynamicPayloads()
-	self.enableAckPayload()
+        self.setAutoAck(True)
+        self.enableDynamicPayloads()
+        self.enableAckPayload()
 
-	self.openReadingPipe(1, pipes[1])
-	self.openReadingPipe(2, pipes[2])
-	self.printDetails()
+        self.openReadingPipe(1, pipes[1])
+        self.openReadingPipe(2, pipes[2])
+        self.printDetails()
 
     def listen(self):
-	self.startListening()
+        self.startListening()
 
 @inlineCallbacks
 def listenForData(radio):
     if not radio.available(0):
-	return
+        return
 
     buffer = yield readMessageToBuffer(radio)
     message = yield convertBufferToUnicode(buffer)
     jsonMessage = yield convertMessageToPostBody(message)
     response = yield postMessageToServer(jsonMessage)
-    
+    yield processServerResponse(response)
 
 def readMessageToBuffer(radio):
     d = defer.Deferred()
@@ -67,10 +69,19 @@ def convertMessageToPostBody(message):
         data = {'uuid':words[0], 'sensor':words[1], 'value':words[2]}
     return data
 
+@inlineCallbacks
 def postMessageToServer(postBody):
-    resp = requests.post('https://httpbin.org/post', data=postBody);
-    print(resp.text);
-    return resp
+    resp = yield treq.post('https://httpbin.org/post',
+                           json.dumps(postBody),
+                           headers={'Content-Type': ['application/json']}) 
+    returnValue(resp)
+
+def processServerResponse(response):
+    response.json().addCallback(printResponse)
+
+def printResponse(responseJson):
+    print("Response: " + json.dumps(responseJson, sort_keys=True,
+                                    indent=4, separators=(',', ': ')))
 
 def shutdown(radio):
     radio.end()
