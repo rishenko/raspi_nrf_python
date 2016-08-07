@@ -38,7 +38,7 @@ def _BV(x):
     return 1 << x
 
 
-class NRF24:
+class NRF24(object):
     MAX_CHANNEL = 127
     MAX_PAYLOAD_SIZE = 32
 

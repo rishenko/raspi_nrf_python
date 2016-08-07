@@ -34,6 +34,7 @@ while(1):
             print("Timed out.")
             break
     receivedMessage = []
+    radio.print_status(radio.get_status())
     radio.read(receivedMessage, radio.getDynamicPayloadSize())
 #    print("Received: {}".format(receivedMessage))
 
@@ -46,8 +47,8 @@ while(1):
 
     print("Message: {}".format(finalMessage))
 #SEND HTTP REQUESTS
-    if finalMessage.count('::') > 0:
-        words = finalMessage.split("::")
-        print("split message: " + str(words))
-        resp = requests.post('https://httpbin.org/post', data={'uuid':words[0], 'sensor':words[1], 'value':words[2]});
-        print(resp.text);
+#    if finalMessage.count('::') > 0:
+#        words = finalMessage.split("::")
+#        print("split message: " + str(words))
+#        resp = requests.post('https://httpbin.org/post', data={'uuid':words[0], 'sensor':words[1], 'value':words[2]});
+#        print(resp.text);
