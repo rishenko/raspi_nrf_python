@@ -1,4 +1,6 @@
 import RPi.GPIO as GPIO
+import uuid
+
 from lib_nrf24 import NRF24
 import spidev
 
@@ -9,12 +11,12 @@ import json
 import treq
 
 GPIO.setmode(GPIO.BCM)
-pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE2]]
+pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], 
+         [0xF0, 0xF0, 0xF0, 0xF0, 0xE1]]
 
 class NRF24Radio(NRF24):
     def __init__(self):
         super(NRF24Radio, self).__init__(GPIO, spidev.SpiDev()) 
-        #self._radio = NRF24(GPIO, spidev.SpiDev())
         self.begin(0, 17)
 
         self.setPayloadSize(32)
@@ -27,7 +29,6 @@ class NRF24Radio(NRF24):
         self.enableAckPayload()
 
         self.openReadingPipe(1, pipes[1])
-        self.openReadingPipe(2, pipes[2])
         self.printDetails()
 
     def listen(self):
@@ -38,22 +39,35 @@ def listenForData(radio):
     if not radio.available(0):
         return
 
-    buffer = yield readMessageToBuffer(radio)
-    message = yield convertBufferToUnicode(buffer)
-    jsonMessage = yield convertMessageToPostBody(message)
-    response = yield postMessageToServer(jsonMessage)
-    yield processServerResponse(response)
+    uid = str(uuid.uuid1())
+    print(uid + ": listenForData start")
 
-def readMessageToBuffer(radio):
+    # Process the incoming data from the radio
+    buffer = yield readMessageToBuffer(radio, uid)
+    message = yield convertBufferToUnicode(buffer, uid)
+
+    # Convert the message to a format that can be sent elsewhere
+    jsonMessage = yield convertMessageToPostBody(message, uid)
+    response = yield postMessageToServer(jsonMessage, uid)
+
+    # Process the response back from the remote server
+    yield processServerResponse(response, uid)
+
+    print(uid + ": listenForData end")
+
+def readMessageToBuffer(radio, uid):
+    print(uid + ": readMessageToBuffer")
     d = defer.Deferred()
     receivedMessage = []
     radio.print_status(radio.get_status())
-    #print("Received: {}".format(receivedMessage))
     radio.read(receivedMessage, radio.getDynamicPayloadSize())
+    print("Received: {}".format(receivedMessage))
+
     d.callback(receivedMessage)
     return d
 
-def convertBufferToUnicode(buffer):
+def convertBufferToUnicode(buffer, uid):
+    print(uid + ": convertBufferToUnicode")
     unicodeText = ""
     for n in buffer:
         # Decode into standard unicode set
@@ -61,7 +75,8 @@ def convertBufferToUnicode(buffer):
             unicodeText += chr(n)
     return unicodeText
 
-def convertMessageToPostBody(message):
+def convertMessageToPostBody(message, uid):
+    print(uid + ": convertMessageToPostBody")
     data = {}
     if message.count('::') > 0:
         words = message.split("::")
@@ -70,17 +85,20 @@ def convertMessageToPostBody(message):
     return data
 
 @inlineCallbacks
-def postMessageToServer(postBody):
+def postMessageToServer(postBody, uid):
+    print(uid + ": postMessageToServer")
     resp = yield treq.post('https://httpbin.org/post',
                            json.dumps(postBody),
                            headers={'Content-Type': ['application/json']}) 
     returnValue(resp)
 
-def processServerResponse(response):
-    response.json().addCallback(printResponse)
+def processServerResponse(response, uid):
+    print(uid + ": processServerResponse")
+    response.json().addCallback(printResponse, uid)
 
-def printResponse(responseJson):
-    print("Response: " + json.dumps(responseJson, sort_keys=True,
+def printResponse(responseJson, uid):
+    print(uid + ": printResponse")
+    print(uid + ": " + "Response: " + json.dumps(responseJson, sort_keys=True,
                                     indent=4, separators=(',', ': ')))
 
 def shutdown(radio):
