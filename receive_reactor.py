@@ -16,7 +16,7 @@ import json
 import treq
 
 def buildLogger():
-    LOG_LEVEL = LogLevel.debug
+    LOG_LEVEL = LogLevel.info
     observer = textFileLogObserver(sys.stdout)
     filteringObs = FilteringLogObserver(observer, 
                                     [LogLevelFilterPredicate(defaultLogLevel=LOG_LEVEL)])
@@ -30,9 +30,9 @@ pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], # writing address
 
 # Extending the NRF24 library to encapsulate basic settings
 class NRF24Radio(NRF24):
+    log = Logger(observer=buildLogger())
 
     def __init__(self):
-        self._log = Logger(observer=buildLogger())
         super(NRF24Radio, self).__init__(GPIO, spidev.SpiDev()) 
         self.begin(0, 17)
 
@@ -53,40 +53,40 @@ class NRF24Radio(NRF24):
 
     def readMessageToBuffer(self):
         receivedMessage = []
-        self.print_status(self.get_status())
+        #self.print_status(self.get_status())
         self.read(receivedMessage, self.getDynamicPayloadSize())
         return receivedMessage
 
-class SensorAggregationController:
+class SensorDataCollector:
+    log = Logger(observer=buildLogger())
 
     def __init__(self, radio):
-        self._log = Logger(observer=buildLogger())
         self._radio = radio
 
     def listenForData(self):
         if not self._radio.available(0):
             return
 
-        uid = str(uuid.uuid1())
-        self._log.info(uid + ": listenForData start")
+        uid = str(uuid.uuid1())[:13]
+        self.log.info(uid + ": listenForData start")
 
         buffer = self._radio.readMessageToBuffer()
 
- 	datum = SensorDatumProcessor(uid, buffer)
+ 	datum = DatumProcessor(uid, buffer)
 	datum.process()
 
-        self._log.info(uid + ": listenForData end")
+        self.log.info(uid + ": listenForData end")
 
-class SensorDatumProcessor:
+class DatumProcessor:
+    log = Logger(observer=buildLogger())
 
     def __init__(self, uid, buffer):
-        self._log = Logger(observer=buildLogger())
         self._uid = uid
         self._buffer = buffer
    
     @inlineCallbacks
     def process(self):
-	self._log.info(self._uid + ": process start")
+	self.log.info(self._uid + ": process start")
         transformer = NRF24DataTransformer(self._uid)
         sensorDataParser = SensorDataParser(self._uid)
         dataBroadcaster = SensorDataBroadcaster(self._uid)
@@ -101,19 +101,19 @@ class SensorDatumProcessor:
         responses = yield dataBroadcaster.broadcast(jsonMessage)
         parsedResponses = yield dataBroadcaster.processResponses(responses)
 
-	self._log.info(self._uid + ": process end")
+	self.log.info(self._uid + ": process end")
 	returnValue(parsedResponses)
 
 # Handle the transformation of incoming data from NRF24 transceivers
 class NRF24DataTransformer:
+    log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
-        self._log = Logger(observer=buildLogger())
         self._uid = uid
 
     def convertBufferToUnicode(self, buffer):
-        self._log.debug(self._uid + ": convertBufferToUnicode")
-	self._log.debug("Buffer: {buffer}", buffer=buffer)
+        self.log.debug(self._uid + ": convertBufferToUnicode")
+	self.log.debug("Buffer: {buffer}", buffer=buffer)
 	def bufferTranslator(buffer):
             unicodeText = ""
             for n in buffer:
@@ -125,31 +125,31 @@ class NRF24DataTransformer:
 
 # Parse incoming sensor data into a dictionary of values
 class SensorDataParser:
+    log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
-        self._log = Logger(observer=buildLogger())
 	self._uid = uid
 
     def convertMessageToPostBody(self, message):
-        self._log.debug(self._uid + ": convertMessageToPostBody")
+        self.log.debug(self._uid + ": convertMessageToPostBody")
         def splitter(message):
             if message.count('::') > 0:
                 words = message.split("::")
-                self._log.debug(self._uid + ": split message: " + str(words))
+                self.log.debug(self._uid + ": split message: " + str(words))
                 data = {'uuid':words[0], 'sensor':words[1], 'value':words[2]}
             return data
         return defer.execute(splitter, message)
 
 # Broadcasts sensor data to any subscribers
 class SensorDataBroadcaster:
+    log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
-        self._log = Logger(observer=buildLogger())
         self._uid = uid
 
     @inlineCallbacks
     def broadcast(self, postBody):
-        self._log.debug(self._uid + ": postMessageToServer")
+        self.log.debug(self._uid + ": postMessageToServer")
         resp = yield treq.post('https://httpbin.org/post',
                                json.dumps(postBody),
                                headers={'Content-Type': ['application/json']}) 
@@ -157,13 +157,13 @@ class SensorDataBroadcaster:
 
     @inlineCallbacks
     def processResponses(self, response):
-        self._log.debug(self._uid + ": processServerResponse")
+        self.log.debug(self._uid + ": processServerResponse")
         json = yield response.json();
 	defer.execute(self._printResponse, json)
         returnValue(json)
 
     def _printResponse(self, responseJson):
-        self._log.debug(self._uid + ": " + "Response: " + json.dumps(responseJson, sort_keys=True,
+        self.log.debug(self._uid + ": " + "Response: " + json.dumps(responseJson, sort_keys=True,
                                                         indent=4, separators=(',', ': ')))
 
 
@@ -176,7 +176,7 @@ def main():
     radio.listen()
 
     globalLog.info("About to start program loop")
-    controller = SensorAggregationController(radio)
+    controller = SensorDataCollector(radio)
     loop = task.LoopingCall(controller.listenForData)
     loop.start(0)
 
