@@ -3,7 +3,8 @@ from lib_nrf24 import NRF24
 import time
 import spidev
 import requests
-from twisted.internet import reactor, task
+from twisted.internet import reactor, task, defer
+from twisted.internet.defer import inlineCallbacks, returnValue
 
 GPIO.setmode(GPIO.BCM)
 pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE2]]
@@ -30,24 +31,27 @@ class NRF24Radio(NRF24):
     def listen(self):
 	self.startListening()
 
+@inlineCallbacks
 def listenForData(radio):
     if not radio.available(0):
 	return
 
-    buffer = readMessageToBuffer()
-    message = convertBufferToUnicode(buffer)
-    jsonMessage = convertMessageToPostBody(message)
-    response = postMessageToServer(jsonMessage)
+    buffer = yield readMessageToBuffer(radio)
+    message = yield convertBufferToUnicode(buffer)
+    jsonMessage = yield convertMessageToPostBody(message)
+    response = yield postMessageToServer(jsonMessage)
+    
 
-def readMessageToBuffer():
+def readMessageToBuffer(radio):
+    d = defer.Deferred()
     receivedMessage = []
     radio.print_status(radio.get_status())
-    radio.read(receivedMessage, radio.getDynamicPayloadSize())
     #print("Received: {}".format(receivedMessage))
-    return receivedMessage
+    radio.read(receivedMessage, radio.getDynamicPayloadSize())
+    d.callback(receivedMessage)
+    return d
 
 def convertBufferToUnicode(buffer):
-    #print("Translating the receivedMessage into unicode characters")
     unicodeText = ""
     for n in buffer:
         # Decode into standard unicode set
@@ -61,16 +65,27 @@ def convertMessageToPostBody(message):
         words = message.split("::")
         print("split message: " + str(words))
         data = {'uuid':words[0], 'sensor':words[1], 'value':words[2]}
-    return data 
+    return data
 
 def postMessageToServer(postBody):
     resp = requests.post('https://httpbin.org/post', data=postBody);
     print(resp.text);
     return resp
- 
-radio = NRF24Radio()
-radio.listen()
 
-loop = task.LoopingCall(listenForData, radio)
-loop.start(1.0)
-reactor.run()
+def shutdown(radio):
+    radio.end()
+ 
+def main():
+    radio = NRF24Radio()
+    radio.listen()
+
+    print("About to start program loop")
+    loop = task.LoopingCall(listenForData, radio)
+    loop.start(0)
+
+    print("Loop has started, going to run reactor")
+    reactor.addSystemEventTrigger("before", "shutdown", shutdown, radio)
+    reactor.run()
+
+if __name__ == "__main__":
+    main()
