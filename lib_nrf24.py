@@ -371,10 +371,20 @@ class NRF24(object):
         # CE optional (at least in some circumstances, eg fixed PTX PRX roles, no powerdown)
         # CE seems to hold itself as (sufficiently) HIGH, but tie HIGH is safer!
         self.spidev.open(0, csn_pin)
+
+        try:
+           self.spidev.max_speed_hz = 10000000  # Maximum supported by NRF24L01+
+        except IOError:
+           pass  # Hardware does not support this speed
+
+
         self.ce_pin = ce_pin
 
         if ce_pin:
             self.GPIO.setup(self.ce_pin, self.GPIO.OUT)
+
+	# Reset radio configuration before applying changes
+        self.reset()
 
         time.sleep(5 / 1000000.0)
 
@@ -439,6 +449,24 @@ class NRF24(object):
         self.ce(NRF24.LOW)
         self.flush_tx()
         self.flush_rx()
+
+    def reset(self):
+        """ Make sure the NRF is in the same state as after power up
+            to avoid problems resulting from left over configuration
+            from other programs."""
+        self.ce(NRF24.LOW)
+        reset_values = {0: 0x08, 1: 0x3F, 2: 0x02, 3: 0x03, 4: 0x03, 5: 0x02, 6: 0x06,
+                        0x0a: [0xe7, 0xe7, 0xe7, 0xe7, 0xe7],
+                        0x0b: [0xc2, 0xc2, 0xc2, 0xc2, 0xc2],
+                        0x0c: 0xc3, 0x0d: 0xc4, 0x0e: 0xc5, 0x0f: 0xc6,
+                        0x10: [0xe7, 0xe7, 0xe7, 0xe7, 0xe7],
+                        0x11: 0, 0x12: 0, 0x13: 0, 0x14: 0, 0x15: 0, 0x16: 0,
+                        0x1c: 0, 0x1d: 0}
+        for reg, value in reset_values.items():
+            self.write_register(reg, value)
+
+        self.flush_rx()
+        self.flush_tx()
 
     def powerDown(self):
         self.write_register(NRF24.CONFIG, self.read_register(NRF24.CONFIG) & ~_BV(NRF24.PWR_UP))
@@ -557,6 +585,14 @@ class NRF24(object):
         self.write_register(NRF24.RX_PW_P0, min(self.payload_size, max_payload_size))
 
     def openReadingPipe(self, child, address):
+        # If this is pipe 0, cache the address.  This is needed because
+        # openWritingPipe() will overwrite the pipe 0 address, so
+        # startListening() will have to restore it.
+        if child >= 6:
+            raise RuntimeError("Invalid pipe number")
+        if (child >= 2 and len(address) > 1) or len(address) > 5:
+            raise RuntimeError("Invalid adress length")
+
         # If this is pipe 0, cache the address.  This is needed because
         # openWritingPipe() will overwrite the pipe 0 address, so
         # startListening() will have to restore it.

@@ -6,7 +6,8 @@ import requests
 
 GPIO.setmode(GPIO.BCM)
 
-pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE1], [0xF0, 0xF0, 0xF0, 0xF0, 0xE2]]
+pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], 
+         [0xF0, 0xF0, 0xF0, 0xF0, 0xE1]]
 
 radio = NRF24(GPIO, spidev.SpiDev())
 radio.begin(0, 17)
@@ -21,7 +22,6 @@ radio.enableDynamicPayloads()
 radio.enableAckPayload()
 
 radio.openReadingPipe(1, pipes[1])
-radio.openReadingPipe(2, pipes[2])
 radio.printDetails()
 radio.startListening()
 

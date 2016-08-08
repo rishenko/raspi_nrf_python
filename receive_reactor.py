@@ -5,6 +5,9 @@ import sys
 from lib_nrf24 import NRF24
 import spidev
 
+from txpostgres import txpostgres
+from twisted.python import util
+
 from twisted.internet import reactor, task, defer, threads
 from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.logger import (
@@ -15,8 +18,9 @@ from twisted.logger import (
 import json
 import treq
 
+# quick twisted logger builder
 def buildLogger():
-    LOG_LEVEL = LogLevel.info
+    LOG_LEVEL = LogLevel.debug
     observer = textFileLogObserver(sys.stdout)
     filteringObs = FilteringLogObserver(observer, 
                                     [LogLevelFilterPredicate(defaultLogLevel=LOG_LEVEL)])
@@ -27,6 +31,11 @@ globalLog = Logger(observer=buildLogger())
 GPIO.setmode(GPIO.BCM)
 pipes = [[0xE8, 0xE8, 0xF0, 0xF0, 0xE1], # writing address
          [0xF0, 0xF0, 0xF0, 0xF0, 0xE1]] # reading address - sensors write to this
+
+def irqTest(data):
+    globalLog.info("***IRQ PINGED*** " + str(data))
+
+GPIO.setup(19, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
 
 # Extending the NRF24 library to encapsulate basic settings
 class NRF24Radio(NRF24):
@@ -57,27 +66,34 @@ class NRF24Radio(NRF24):
         self.read(receivedMessage, self.getDynamicPayloadSize())
         return receivedMessage
 
-class SensorDataCollector:
+class SensorDataCollector(object):
     log = Logger(observer=buildLogger())
 
     def __init__(self, radio):
         self._radio = radio
 
     def listenForData(self):
-        if not self._radio.available(0):
+        if GPIO.input(19):
+            print('Input was HIGH')
+        else:
+            print('Input was LOW')
+        if GPIO.input(19) or not self._radio.available(0):
+	    self.log.info("radio not available")
             return
 
-        uid = str(uuid.uuid1())[:13]
-        self.log.info(uid + ": listenForData start")
+        self.log.info("listenForData start")
+	while self._radio.available(0):
+            self.log.info("radio is still available, processing")
+            uid = str(uuid.uuid1())[:13]
 
-        buffer = self._radio.readMessageToBuffer()
+            buffer = self._radio.readMessageToBuffer()
 
- 	datum = DatumProcessor(uid, buffer)
-	datum.process()
+ 	    datum = DatumProcessor(uid, buffer)
+	    datum.process()
 
-        self.log.info(uid + ": listenForData end")
+        self.log.info("listenForData end")
 
-class DatumProcessor:
+class DatumProcessor(object):
     log = Logger(observer=buildLogger())
 
     def __init__(self, uid, buffer):
@@ -86,6 +102,10 @@ class DatumProcessor:
    
     @inlineCallbacks
     def process(self):
+        if GPIO.input(17):
+            print('Input was HIGH')
+        else:
+            print('Input was LOW')
 	self.log.info(self._uid + ": process start")
         transformer = NRF24DataTransformer(self._uid)
         sensorDataParser = SensorDataParser(self._uid)
@@ -95,17 +115,20 @@ class DatumProcessor:
         message = yield transformer.convertBufferToUnicode(self._buffer)
 
         # Convert the message to a format that can be sent elsewhere
-        jsonMessage = yield sensorDataParser.convertMessageToPostBody(message)
+        jsonMessage = yield sensorDataParser.convertMessageToDictionary(message)
 
         # Process the response back from the remote server
         responses = yield dataBroadcaster.broadcast(jsonMessage)
         parsedResponses = yield dataBroadcaster.processResponses(responses)
 
+        sensorDb = SensorDatabase() 
+	dbResponse = sensorDb.processSensorData(jsonMessage)
+        
 	self.log.info(self._uid + ": process end")
 	returnValue(parsedResponses)
 
 # Handle the transformation of incoming data from NRF24 transceivers
-class NRF24DataTransformer:
+class NRF24DataTransformer(object):
     log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
@@ -113,24 +136,26 @@ class NRF24DataTransformer:
 
     def convertBufferToUnicode(self, buffer):
         self.log.debug(self._uid + ": convertBufferToUnicode")
-	self.log.debug("Buffer: {buffer}", buffer=buffer)
+	self.log.debug(self._uid+ ": Buffer: {buffer}", buffer=buffer)
 	def bufferTranslator(buffer):
             unicodeText = ""
             for n in buffer:
                 # Decode into standard unicode set
                 if (n >= 32 and n <= 126):
                     unicodeText += chr(n)
+                elif (n != 0):
+	            self.log.warn(self._uid + ": character outside of unicode range: " + str(n));	
 	    return unicodeText
         return defer.execute(bufferTranslator, buffer)
 
 # Parse incoming sensor data into a dictionary of values
-class SensorDataParser:
+class SensorDataParser(object):
     log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
 	self._uid = uid
 
-    def convertMessageToPostBody(self, message):
+    def convertMessageToDictionary(self, message):
         self.log.debug(self._uid + ": convertMessageToPostBody")
         def splitter(message):
             if message.count('::') > 0:
@@ -141,7 +166,7 @@ class SensorDataParser:
         return defer.execute(splitter, message)
 
 # Broadcasts sensor data to any subscribers
-class SensorDataBroadcaster:
+class SensorDataBroadcaster(object):
     log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
@@ -152,7 +177,8 @@ class SensorDataBroadcaster:
         self.log.debug(self._uid + ": postMessageToServer")
         resp = yield treq.post('https://httpbin.org/post',
                                json.dumps(postBody),
-                               headers={'Content-Type': ['application/json']}) 
+                               headers={'Content-Type': ['application/json']},
+			       timeout=5) 
         returnValue(resp)
 
     @inlineCallbacks
@@ -163,25 +189,62 @@ class SensorDataBroadcaster:
         returnValue(json)
 
     def _printResponse(self, responseJson):
-        self.log.debug(self._uid + ": " + "Response: " + json.dumps(responseJson, sort_keys=True,
-                                                        indent=4, separators=(',', ': ')))
+        jsonDump = json.dumps(responseJson, sort_keys=True, indent=4, separators=(',', ': ')) 
+        #self.log.debug(self._uid + ": " + "Response: " + jsonDump)
+
+class SensorDatabase:
+    log = Logger(observer=buildLogger())
+
+    def __init__(self):
+        conn = txpostgres.Connection()
+        self._def = conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
+	self._conn = conn
+
+    def processSensorData(self, data):
+        dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
+        values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value']) 
+	self._def.addCallback(lambda _: self._conn.runOperation(dml, values))
+	self._def.addCallback(lambda _: self._conn.close())
+	self._def.addErrback(self.log.error)
 
 
 #handle shutting down all the things
 def shutdown(radio):
     radio.end()
+    GPIO.cleanup()
  
+#class InterruptHandler:
+#    def __init__(self, controller, reactor):
+#        self._controller = controller
+#        self._reactor = reactor
+
+def gpioEventTrigger(channel):
+    reactor.callFromThread(controller.listenForData) 
+
+def gpioKickoff():
+    GPIO.add_event_detect(19, GPIO.FALLING,
+                              callback=gpioEventTrigger,
+                              bouncetime=300)
+
+
+radio = NRF24Radio()
+radio.listen()
+
+globalLog.info("About to start program loop")
+controller = SensorDataCollector(radio)
+
 def main():
-    radio = NRF24Radio()
-    radio.listen()
 
-    globalLog.info("About to start program loop")
-    controller = SensorDataCollector(radio)
+    #irqHandler = InterruptHandler(controller, reactor)
     loop = task.LoopingCall(controller.listenForData)
-    loop.start(0)
+    loop.start(.05)
 
-    globalLog.info("Loop has started, going to run reactor")
-    reactor.addSystemEventTrigger("before", "shutdown", shutdown, radio)
+    gpioKickoff()
+
+    #globalLog.info("Interrupt trigger has started, going to run reactor")
+    #globalLog.info("Loop has started, going to run reactor")
+    #reactor.addSystemEventTrigger("before", "shutdown", shutdown, radio)
+    #reactor.callFromThread(gpioKickoff)
     reactor.run()
 
 if __name__ == "__main__":
