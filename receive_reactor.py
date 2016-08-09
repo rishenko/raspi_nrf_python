@@ -1,7 +1,8 @@
 import RPi.GPIO as GPIO
 import uuid
-import sys, threading
+import sys, threading, Queue, itertools
 from threading import Thread
+from zope.interface import Interface, implementer
 
 
 from lib_nrf24 import NRF24
@@ -69,15 +70,19 @@ class NRF24Radio(NRF24):
 class SensorDataCollector(object):
     _log = Logger(observer=buildLogger())
 
-    def __init__(self, radio, reactor):
+    def __init__(self, radio, reactor, queue):
         self._radio = radio
         self._reactor = reactor
+	self._readingsQueue = queue
+
+    def getReadings(self):
+        return self._readingsQueue
 
     def listenForData(self):
         #if GPIO.input(IRQ_PIN) or not self._radio.available(0):
         #if not self._radio.available(0):
         if GPIO.input(IRQ_PIN):
-	    self._log.debug("radio not available")
+	    #self._log.debug("radio not available")
             return
 
         self._log.info("listenForData start")
@@ -85,12 +90,57 @@ class SensorDataCollector(object):
 	while self._radio.available(0):
             self._log.info("radio is available, processing")
             buffer = self._radio.readMessageToBuffer()
+ 	    readingsQueue.put(buffer)
 
- 	    datum = DatumProcessor(buffer)
-	    datum.process()
-            self._log.info("finished creating a datum")
+ 	    #datum = DatumProcessor(buffer)
+	    #datum.process()
+            #self._log.info("finished creating a datum")
 
         self._log.info("listenForData end")
+
+class SensorDataProcessor:
+    _log = Logger(observer=buildLogger())
+
+    def __init__(self, queue):
+	self._readingsQueue = queue
+        self._uid = "uuid"
+        self._transformer = NRF24DataTransformer(self._uid)
+        self._dataParser = SensorDataParser(self._uid)
+        self._buildProcessList()
+
+    def _buildProcessList(self):
+        self._processorList = []
+        self._processorList.append(WebServiceProcessor(self._uid))
+        self._processorList.append(DatabaseProcessor())
+
+    @inlineCallbacks
+    def processQueue(self):
+        if self._readingsQueue.qsize() < 10:
+   	    self._log.debug("queue size is less than 50")
+	    returnValue(False)
+
+        self. _log.info("before map")
+        queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
+        convertedDList = yield defer.execute(map, self.parseMessage, queueIter) 		
+        self._log.info("after map")
+        transformedMsgs = yield defer.gatherResults(convertedDList, consumeErrors=True) 
+        self._log.info("after gather results")
+        processorTasks = []
+ 	for processor in self._processorList:
+  	    d = processor.process(transformedMsgs)
+	    processorTasks.append(d)	
+
+        returnValue(True)
+     
+    @inlineCallbacks
+    def parseMessage(self, byteMessage):
+        unicode = yield self._transformer.convertBufferToUnicode(byteMessage) 	
+        jsonMessage = yield self._dataParser.convertMessageToDictionary(unicode)
+        returnValue(jsonMessage)
+
+class IProcessor(Interface):
+    def process(messageList):
+	""" process the data in the list """
 
 class DatumProcessor(object):
     log = Logger(observer=buildLogger())
@@ -103,20 +153,16 @@ class DatumProcessor(object):
     def process(self):
 	self.log.info(self._uid + ": process start")
         try:
-            transformer = NRF24DataTransformer(self._uid)
-            sensorDataParser = SensorDataParser(self._uid)
-            dataBroadcaster = SensorDataBroadcaster(self._uid)
+            wsProcessor = WebServiceProcessor(self._uid)
             sensorDb = SensorDatabase(self._uid) 
 
             # Process the incoming data from the radio
-            message = yield transformer.convertBufferToUnicode(self._buffer)
 
             # Convert the message to a format that can be sent elsewhere
-            jsonMessage = yield sensorDataParser.convertMessageToDictionary(message)
 
             # Send the data to a remote server
-            responses = yield dataBroadcaster.broadcast(jsonMessage)
-            parsedResponses = dataBroadcaster.processResponses(responses)
+            responses = yield wsProcessor.process(jsonMessage)
+            #parsedResponses = wsProcessor.processResponses(responses)
 
             # Insert the data into the local db
 	    dbResponse = sensorDb.processSensorData(jsonMessage)
@@ -173,14 +219,19 @@ class SensorDataParser(object):
 
 
 # Broadcasts sensor data to any subscribers
-class SensorDataBroadcaster(object):
+@implementer(IProcessor)
+class WebServiceProcessor(object):
     log = Logger(observer=buildLogger())
 
     def __init__(self, uid):
         self._uid = uid
 
     @inlineCallbacks
-    def broadcast(self, postBody):
+    def process(self, messageList):
+	""" convert messagelist into a post for a web service """
+	yield defer.execute(self.log.debug, "process")
+
+    def processSinglePost(self, postBody):
         self.log.debug(self._uid + ": postMessageToServer")
         try:
             resp = yield treq.post('https://httpbin.org/post',
@@ -200,6 +251,8 @@ class SensorDataBroadcaster(object):
             returnValue(json)
         except Exception as err:
   	    self.log.error(err)
+	finally:
+	    returnValue(True)
 
     def _printResponse(self, responseJson):
         jsonDump = json.dumps(responseJson, sort_keys=True, indent=4, separators=(',', ': ')) 
@@ -220,16 +273,20 @@ class SensorDataBroadcaster(object):
 
 
 # database holder for sensor
-class SensorDatabase:
+@implementer(IProcessor)
+class DatabaseProcessor:
     log = Logger(observer=buildLogger())
     dataToInsert = defer.DeferredQueue()
 
-    def __init__(self, uid):
-        self._uid=uid
-
+    @inlineCallbacks
+    def process(self, messageList):
+	""" process list into database transaction """
+	#yield defer.execute(self.log.debug, "process")
+        yield self.batchProcessSensorData(messageList)         
+ 
     @inlineCallbacks
     def processSensorData(self, data):
-        self.log.debug(self._uid + ": processSensorData")
+        self.log.debug("processSensorData")
         try: 
             conn = txpostgres.Connection()
             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
@@ -241,28 +298,62 @@ class SensorDatabase:
 	    self.log.error(err)
 	finally:
 	    self._conn.close()
+	    returnValue(True)
 
 
     @inlineCallbacks
-    def processSensorDataTrans(self, queue):
-        self.log.debug(self._uid + ": processSensorData")
+    def batchProcessSensorData(self, list):
+        self.log.debug("batchProcessSensorData")
         try: 
             conn = txpostgres.Connection()
-            dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
-            values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value']) 
-
-            self._conn = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
-	    yield self._conn.runOperation(dml, values)
+            connDef = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
+            results = yield conn.runInteraction(self._buildTransactionLoop, list) 
+            returnValue(results)  
         except Exception as err:
 	    self.log.error(err)
 	finally:
-	    self._conn.close()
+	    conn.close()
+
+    @inlineCallbacks
+    def _buildTransactionLoop(self, cur, list):
+        listOfExecutions = []
+        for data in list:
+             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value)'
+             dml += ' values (%s, %s, %s, %s, %s)'
+             values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value']) 
+
+             yield cur.execute(dml, values)
+        results = yield defer.gatherResults(listOfExecutions) 
+        returnValue(results)
 
 
 # IRQ trigger, though not used
 # def gpioEventTrigger(channel, reactor, controller):
 #    globalLog.info("***IRQ trigger called on channel " + str(channel))
 #    reactor.callFromThread(controller.listenForData) 
+
+def iter_except(func, exception, first=None):
+    """ Call a function repeatedly until an exception is raised.
+
+    Converts a call-until-exception interface to an iterator interface.
+    Like builtins.iter(func, sentinel) but uses an exception instead
+    of a sentinel to end the loop.
+
+    Examples:
+        iter_except(functools.partial(heappop, h), IndexError)   # priority queue iterator
+        iter_except(d.popitem, KeyError)                         # non-blocking dict iterator
+        iter_except(d.popleft, IndexError)                       # non-blocking deque iterator
+        iter_except(q.get_nowait, Queue.Empty)                   # loop over a producer Queue
+        iter_except(s.pop, KeyError)                             # non-blocking set iterator
+
+    """
+    try:
+        if first is not None:
+            yield first()            # For database APIs needing an initial cast to db.first()
+        while 1:
+            yield func()
+    except exception:
+        pass
 
 
 #handle shutting down all the things
@@ -276,10 +367,24 @@ if __name__ == "__main__":
     radio.listen()
 
     globalLog.info("About to start program loop")
-    controller = SensorDataCollector(radio, reactor)
+    readingsQueue = Queue.Queue()
+    globalLog.info("Queue created")
+
+    controller = SensorDataCollector(radio, reactor, readingsQueue)
+    globalLog.info("Collector created")
+
+    processor = SensorDataProcessor(readingsQueue)
+    globalLog.info("DataPocessor created")
 
     loop = task.LoopingCall(controller.listenForData)
+    globalLog.info("LC 1 created")
     loop.start(.05)
+    globalLog.info("LC 1 started")
+
+    loop = task.LoopingCall(processor.processQueue)
+    globalLog.info("LC 2 created")
+    loop.start(5)
+    globalLog.info("LC 2 started")
 
     globalLog.info("Loop has started, going to run reactor")
 
