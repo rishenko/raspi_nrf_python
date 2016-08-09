@@ -74,11 +74,14 @@ class SensorDataCollector(object):
         self._reactor = reactor
 
     def listenForData(self):
-        if GPIO.input(IRQ_PIN) or not self._radio.available(0):
+        #if GPIO.input(IRQ_PIN) or not self._radio.available(0):
+        #if not self._radio.available(0):
+        if GPIO.input(IRQ_PIN):
 	    self._log.debug("radio not available")
             return
 
         self._log.info("listenForData start")
+
 	while self._radio.available(0):
             self._log.info("radio is available, processing")
             buffer = self._radio.readMessageToBuffer()
@@ -87,8 +90,6 @@ class SensorDataCollector(object):
 	    datum.process()
             self._log.info("finished creating a datum")
 
-        workerCount = len(self._reactor.getThreadPool().threads)
-	self._log.info("***thread pool size: " + str(workerCount))
         self._log.info("listenForData end")
 
 class DatumProcessor(object):
@@ -105,6 +106,7 @@ class DatumProcessor(object):
             transformer = NRF24DataTransformer(self._uid)
             sensorDataParser = SensorDataParser(self._uid)
             dataBroadcaster = SensorDataBroadcaster(self._uid)
+            sensorDb = SensorDatabase(self._uid) 
 
             # Process the incoming data from the radio
             message = yield transformer.convertBufferToUnicode(self._buffer)
@@ -114,14 +116,13 @@ class DatumProcessor(object):
 
             # Send the data to a remote server
             responses = yield dataBroadcaster.broadcast(jsonMessage)
-            parsedResponses = yield dataBroadcaster.processResponses(responses)
+            parsedResponses = dataBroadcaster.processResponses(responses)
 
             # Insert the data into the local db
-            sensorDb = SensorDatabase() 
 	    dbResponse = sensorDb.processSensorData(jsonMessage)
         
 	    self.log.info(self._uid + ": process end")
-	    returnValue(parsedResponses)
+	    #returnValue(parsedResponses)
         except Exception as err:
   	    self.log.error(err)
 
@@ -192,8 +193,8 @@ class SensorDataBroadcaster(object):
 
     @inlineCallbacks
     def processResponses(self, response):
+        self.log.debug(self._uid + ": processServerResponse")
         try:
-            self.log.debug(self._uid + ": processServerResponse")
             json = yield response.json();
 	    defer.execute(self._printResponse, json)
             returnValue(json)
@@ -204,13 +205,47 @@ class SensorDataBroadcaster(object):
         jsonDump = json.dumps(responseJson, sort_keys=True, indent=4, separators=(',', ': ')) 
         #self.log.debug(self._uid + ": " + "Response: " + jsonDump)
 
+#broacaster has a series of processing objects
+#when a new datum is passed in, it creates a deferred list of those processing objects
+#final processing for that datum is considered complete when all processors have completed
+#^^^ is that necessary? Who cares if any fail?
+
+#consider a queue for database stuff. We are inserting large amounts.
+#need to queue up a batch instead of inserting all at once
+#does the same apply to web requests? Should we be sending single
+#requests for each device/sensor, or sending off a batch?
+#the former means each item gets stored, the latter means
+#far less CPU and network intensive operations
+#which could be great for a Raspberry pi
+
 
 # database holder for sensor
 class SensorDatabase:
     log = Logger(observer=buildLogger())
+    dataToInsert = defer.DeferredQueue()
+
+    def __init__(self, uid):
+        self._uid=uid
 
     @inlineCallbacks
     def processSensorData(self, data):
+        self.log.debug(self._uid + ": processSensorData")
+        try: 
+            conn = txpostgres.Connection()
+            dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
+            values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value']) 
+
+            self._conn = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
+	    yield self._conn.runOperation(dml, values)
+        except Exception as err:
+	    self.log.error(err)
+	finally:
+	    self._conn.close()
+
+
+    @inlineCallbacks
+    def processSensorDataTrans(self, queue):
+        self.log.debug(self._uid + ": processSensorData")
         try: 
             conn = txpostgres.Connection()
             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
