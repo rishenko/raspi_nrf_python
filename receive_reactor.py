@@ -1,6 +1,6 @@
 import RPi.GPIO as GPIO
 import uuid
-import sys, threading, Queue, itertools
+import sys, time, threading, Queue, itertools
 from threading import Thread
 from zope.interface import Interface, implementer
 
@@ -79,8 +79,6 @@ class SensorDataCollector(object):
         return self._readingsQueue
 
     def listenForData(self):
-        #if GPIO.input(IRQ_PIN) or not self._radio.available(0):
-        #if not self._radio.available(0):
         if GPIO.input(IRQ_PIN):
 	    #self._log.debug("radio not available")
             return
@@ -90,15 +88,28 @@ class SensorDataCollector(object):
 	while self._radio.available(0):
             self._log.info("radio is available, processing")
             buffer = self._radio.readMessageToBuffer()
- 	    readingsQueue.put(buffer)
-
- 	    #datum = DatumProcessor(buffer)
-	    #datum.process()
-            #self._log.info("finished creating a datum")
+            rd = RawReadingDatum(buffer, time.time())
+ 	    readingsQueue.put(rd)
 
         self._log.info("listenForData end")
 
-class SensorDataProcessor:
+
+class RawReadingDatum(object):
+    def __init__(self, buffer, time):
+        self.buffer = buffer
+        self.time = time
+
+
+class ReadingDatum(object):
+    def __init__(self, deviceId, sensorId, reading, time):
+        self.deviceId = deviceId
+	self.sensorId = sensorId
+	self.reading = reading
+	self.time = time
+
+    
+
+class SensorDataProcessor(object):
     _log = Logger(observer=buildLogger())
 
     def __init__(self, queue):
@@ -119,58 +130,26 @@ class SensorDataProcessor:
    	    self._log.debug("queue size is less than 50")
 	    returnValue(False)
 
-        self. _log.info("before map")
         queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
-        convertedDList = yield defer.execute(map, self.parseMessage, queueIter) 		
-        self._log.info("after map")
-        transformedMsgs = yield defer.gatherResults(convertedDList, consumeErrors=True) 
-        self._log.info("after gather results")
+        convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter) 		
+
+        resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True) 
         processorTasks = []
  	for processor in self._processorList:
-  	    d = processor.process(transformedMsgs)
+  	    d = processor.process(resultingData)
 	    processorTasks.append(d)	
 
         returnValue(True)
      
     @inlineCallbacks
-    def parseMessage(self, byteMessage):
-        unicode = yield self._transformer.convertBufferToUnicode(byteMessage) 	
-        jsonMessage = yield self._dataParser.convertMessageToDictionary(unicode)
-        returnValue(jsonMessage)
+    def parseRawDatum(self, rawDatum):
+        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer) 	
+        readingDatum = yield self._dataParser.convertMessageToDictionary(unicode, rawDatum.time)
+        returnValue(readingDatum)
 
 class IProcessor(Interface):
     def process(messageList):
 	""" process the data in the list """
-
-class DatumProcessor(object):
-    log = Logger(observer=buildLogger())
-
-    def __init__(self, buffer):
-        self._buffer = buffer
-        self._uid = str(uuid.uuid1())[:13]
-   
-    @inlineCallbacks
-    def process(self):
-	self.log.info(self._uid + ": process start")
-        try:
-            wsProcessor = WebServiceProcessor(self._uid)
-            sensorDb = SensorDatabase(self._uid) 
-
-            # Process the incoming data from the radio
-
-            # Convert the message to a format that can be sent elsewhere
-
-            # Send the data to a remote server
-            responses = yield wsProcessor.process(jsonMessage)
-            #parsedResponses = wsProcessor.processResponses(responses)
-
-            # Insert the data into the local db
-	    dbResponse = sensorDb.processSensorData(jsonMessage)
-        
-	    self.log.info(self._uid + ": process end")
-	    #returnValue(parsedResponses)
-        except Exception as err:
-  	    self.log.error(err)
 
 
 # Handle the transformation of incoming data from NRF24 transceivers
@@ -206,22 +185,26 @@ class SensorDataParser(object):
     def __init__(self, uid):
 	self._uid = uid
 
-    def convertMessageToDictionary(self, message):
+    def convertMessageToDictionary(self, message, timestamp):
         self.log.debug(self._uid + ": convertMessageToPostBody")
-        return defer.execute(self._convertMessageToDictionary, message)
+        return defer.execute(self._convertMessageToDictionary, message, timestamp)
 
-    def _convertMessageToDictionary(self, message):
-        if message.count('::') > 0:
+    def _convertMessageToDictionary(self, message, timestamp):
+        if message.count('::') > 1:
             words = message.split("::")
             self.log.debug(self._uid + ": split message: " + str(words))
-            data = {'uuid':words[0], 'sensor':words[1], 'value':words[2]}
-        return data
+	    #deviceId, sensorId, reading, time 
+	    datum = ReadingDatum(words[0], words[1], words[2], timestamp)
+        return datum
 
 
 # Broadcasts sensor data to any subscribers
 @implementer(IProcessor)
 class WebServiceProcessor(object):
     log = Logger(observer=buildLogger())
+    
+    #single reading: POST /api/devices/<device_id>/sensors/<sensor_id>/readings?api_key=<key>
+    #multiple readings: POST /api/readings?api_key=<key>
 
     def __init__(self, uid):
         self._uid = uid
@@ -230,6 +213,7 @@ class WebServiceProcessor(object):
     def process(self, messageList):
 	""" convert messagelist into a post for a web service """
 	yield defer.execute(self.log.debug, "process")
+         
 
     def processSinglePost(self, postBody):
         self.log.debug(self._uid + ": postMessageToServer")
@@ -241,6 +225,7 @@ class WebServiceProcessor(object):
             returnValue(resp)
         except Exception as err:
 	    self.log.error(err)
+
 
     @inlineCallbacks
     def processResponses(self, response):
@@ -279,10 +264,10 @@ class DatabaseProcessor:
     dataToInsert = defer.DeferredQueue()
 
     @inlineCallbacks
-    def process(self, messageList):
+    def process(self, dataList):
 	""" process list into database transaction """
 	#yield defer.execute(self.log.debug, "process")
-        yield self.batchProcessSensorData(messageList)         
+        yield self.batchProcessSensorData(dataList)         
  
     @inlineCallbacks
     def processSensorData(self, data):
@@ -317,10 +302,10 @@ class DatabaseProcessor:
     @inlineCallbacks
     def _buildTransactionLoop(self, cur, list):
         listOfExecutions = []
-        for data in list:
+        for datum in list:
              dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value)'
              dml += ' values (%s, %s, %s, %s, %s)'
-             values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value']) 
+             values = (datum.deviceId, 'deviceXname', 'sensorXid', datum.sensorId, datum.reading) 
 
              yield cur.execute(dml, values)
         results = yield defer.gatherResults(listOfExecutions) 
