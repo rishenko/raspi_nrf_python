@@ -1,22 +1,22 @@
-import Adafruit_GPIO as GPIO
-import spidev
 import threading, Queue
 from sb import util, radio, collector, processor
+from sb.radio import NRF24Radio
+from sb.collector import SensorDataCollector
+from sb.processor import SensorDataProcessor
 
 from twisted.internet import reactor, task
 from sb.util import Log
 
-globalLog = Log.buildLogger()
+globalLog = Log().buildLogger()
 
 #handle shutting down all the things
 def shutdown(radio):
     radio.end()
-    GPIO.cleanup()
     globalLog.info("Finished shutting down the radio and GPIO.")
 
 if __name__ == "__main__":
     globalLog.info("Startin up NRF24 radio")
-    radio = NRF24Radio(GPIO, spidev)
+    radio = NRF24Radio()
     radio.listen()
 
     readingsQueue = Queue.Queue()

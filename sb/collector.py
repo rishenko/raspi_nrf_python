@@ -23,6 +23,11 @@ class SensorDataCollector(object):
             self._log.info("radio is available, processing")
             buffer = self._radio.readMessageToBuffer()
             rd = RawReadingDatum(buffer, time.time())
-            readingsQueue.put(rd)
+            self._readingsQueue.put(rd)
 
             self._log.info("listenForData end")
+
+class RawReadingDatum(object):
+    def __init__(self, buffer, time):
+        self.buffer = buffer
+        self.time = time

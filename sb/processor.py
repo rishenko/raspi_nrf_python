@@ -2,6 +2,7 @@ import json
 import treq
 import util
 from util import Log, iter_except
+import Queue
 
 from txpostgres import txpostgres
 from twisted.python import util
@@ -37,24 +38,71 @@ class SensorDataProcessor(object):
 
         queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
         convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
-
         resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
         processorTasks = []
         for processor in self._processorList:
             d = processor.process(resultingData)
             processorTasks.append(d)
 
-        returnValue(True)
+        returnValue(processorTasks)
 
     @inlineCallbacks
     def parseRawDatum(self, rawDatum):
         unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer)
-        readingDatum = yield self._dataParser.convertMessageToDictionary(unicode, rawDatum.time)
+        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time)
         returnValue(readingDatum)
 
 
+# Handle the transformation of incoming data from NRF24 transceivers
+class NRF24DataTransformer(object):
+    log = Log().buildLogger()
 
+    def __init__(self, uid):
+        self._uid = uid
 
+    def convertBufferToUnicode(self, buffer):
+        self.log.debug(self._uid + ": convertBufferToUnicode")
+        self.log.debug(self._uid + ": Buffer: {buffer}", buffer=buffer)
+        return defer.execute(self._convertBufferToUnicode, buffer)
+
+    def _convertBufferToUnicode(self, buffer):
+        unicodeText = ""
+        for n in buffer:
+            # Decode into standard unicode set
+            if (n >= 32 and n <= 126):
+                unicodeText += chr(n)
+            elif (n != 0):
+                self.log.warn(self._uid + ": character outside of unicode range: " + str(n));
+
+        self.log.debug("message received: " + unicodeText)
+        return unicodeText
+
+# Parse incoming sensor data into a dictionary of values
+class SensorDataParser(object):
+    log = Log().buildLogger()
+
+    def __init__(self, uid):
+        self._uid = uid
+
+    def convertMessageToDTO(self, message, timestamp):
+        self.log.debug(self._uid + ": convertMessageToPostBody")
+        return defer.execute(self._convertMessageToDTO, message, timestamp)
+
+    def _convertMessageToDTO(self, message, timestamp):
+        if message.count('::') > 1:
+            words = message.split("::")
+            self.log.debug(self._uid + ": split message: " + str(words))
+        #deviceId, sensorId, reading, time
+        datum = SensorReadingDTO(words[0], words[1], words[2], timestamp)
+        return datum
+
+# small DTO
+class SensorReadingDTO(object):
+    def __init__(self, deviceId, sensorId, reading, time):
+        self.deviceId = deviceId
+        self.sensorId = sensorId
+        self.reading = reading
+        self.time = time
 
 class IProcessor(Interface):
     def process(messageList):
@@ -155,6 +203,7 @@ class DatabaseProcessor:
             conn = txpostgres.Connection()
             connDef = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
             results = yield conn.runInteraction(self._buildTransactionLoop, list)
+            self.log.info("batch database results: " + str(results))
             returnValue(results)
         except Exception as err:
             self.log.error(err)
@@ -163,12 +212,8 @@ class DatabaseProcessor:
 
     @inlineCallbacks
     def _buildTransactionLoop(self, cur, list):
-        listOfExecutions = []
         for datum in list:
              dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value)'
              dml += ' values (%s, %s, %s, %s, %s)'
              values = (datum.deviceId, 'deviceXname', 'sensorXid', datum.sensorId, datum.reading)
-
              yield cur.execute(dml, values)
-        results = yield defer.gatherResults(listOfExecutions)
-        returnValue(results)
