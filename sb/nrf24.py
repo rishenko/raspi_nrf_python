@@ -3,7 +3,8 @@
 #
 
 
-# This file lib_nrf24.py is a slightly tweaked version of Barraca's "pynrf24".
+# This file is tweaked version of lib_nrf24.py, which
+# is a slightly tweaked version of Barraca's "pynrf24".
 
 # So this is my tweak for Raspberry Pi and "Virtual GPIO" ...
 #       ... of Barraca's port to BeagleBone python ...  (Joao Paulo Barraca <jpbarraca@gmail.com>)
@@ -29,7 +30,7 @@ import time
 
 if __name__ == '__main__':
     print (sys.argv[0], 'is an importable module:')
-    print ("...  from", sys.argv[0], "import lib_nrf24")
+    print ("...  from", sys.argv[0], "import nrf24")
     print ("")
 
     exit()
