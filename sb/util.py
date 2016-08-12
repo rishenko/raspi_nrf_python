@@ -36,3 +36,8 @@ def iter_except(func, exception, first=None):
             yield func()
     except exception:
         pass
+
+def convertToDict(obj):
+    d = {}
+    d.update(obj.__dict__)
+    return d

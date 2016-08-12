@@ -1,12 +1,12 @@
 import sys, time, threading, Queue, itertools
 from util import Log
+from sb.dto import RawSensorReadingDTO
 
 class SensorDataCollector(object):
     _log = Log().buildLogger()
 
-    def __init__(self, radio, reactor, queue):
+    def __init__(self, radio, queue):
         self._radio = radio
-        self._reactor = reactor
         self._readingsQueue = queue
 
     def getReadings(self):
@@ -22,12 +22,7 @@ class SensorDataCollector(object):
         while self._radio.available(0):
             self._log.info("radio is available, processing")
             buffer = self._radio.readMessageToBuffer()
-            rd = RawReadingDatum(buffer, time.time())
+            rd = RawSensorReadingDTO(buffer, time.time())
             self._readingsQueue.put(rd)
 
             self._log.info("listenForData end")
-
-class RawReadingDatum(object):
-    def __init__(self, buffer, time):
-        self.buffer = buffer
-        self.time = time

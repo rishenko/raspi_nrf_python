@@ -1,6 +1,6 @@
 import Adafruit_GPIO.GPIO as GPIO
 from nrf24 import NRF24
-from util import Log
+from sb.util import Log
 
 from twisted.internet import reactor, task, defer, threads
 from twisted.internet.defer import inlineCallbacks, returnValue
@@ -43,11 +43,3 @@ class NRF24Radio(NRF24):
         #self.print_status(self.get_status())
         self.read(receivedMessage, self.getDynamicPayloadSize())
         return receivedMessage
-
-
-class ReadingDatum(object):
-    def __init__(self, deviceId, sensorId, reading, time):
-        self.deviceId = deviceId
-        self.sensorId = sensorId
-        self.reading = reading
-        self.time = time

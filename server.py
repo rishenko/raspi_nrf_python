@@ -22,9 +22,12 @@ if __name__ == "__main__":
     readingsQueue = Queue.Queue()
     globalLog.info("Queue created")
 
-    controller = SensorDataCollector(radio, reactor, readingsQueue)
+    controller = SensorDataCollector(radio, readingsQueue)
     globalLog.info("Collector created")
 
+    processorList = []
+    processorList.append(WebServiceProcessor())
+    processorList.append(DatabaseProcessor())
     processor = SensorDataProcessor(readingsQueue)
     globalLog.info("DataPocessor created")
 

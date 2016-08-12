@@ -1,8 +1,9 @@
 import json
 import treq
 import util
-from util import Log, iter_except
+from util import Log, iter_except, convertToDict
 import Queue
+from sb.dto import SensorReadingDTO, RawSensorReadingDTO
 
 from txpostgres import txpostgres
 from twisted.python import util
@@ -18,22 +19,18 @@ from zope.interface import Interface, implementer
 class SensorDataProcessor(object):
     _log = Log().buildLogger()
 
-    def __init__(self, queue):
-        self._readingsQueue = queue
-        self._uid = "uuid"
-        self._transformer = NRF24DataTransformer(self._uid)
-        self._dataParser = SensorDataParser(self._uid)
-        self._buildProcessList()
+    QUEUE_SIZE=10
 
-    def _buildProcessList(self):
-        self._processorList = []
-        self._processorList.append(WebServiceProcessor(self._uid))
-        self._processorList.append(DatabaseProcessor())
+    def __init__(self, queue, processorList):
+        self._readingsQueue = queue
+        self._transformer = NRF24DataTransformer()
+        self._dataParser = SensorDataParser()
+        self._processorList = processorList
 
     @inlineCallbacks
     def processQueue(self):
-        if self._readingsQueue.qsize() < 10:
-            self._log.debug("queue size is less than 50")
+        if self._readingsQueue.qsize() < self.QUEUE_SIZE:
+            self._log.debug("queue size is less than " + str(QUEUE_SIZE))
             returnValue(False)
 
         queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
@@ -48,8 +45,8 @@ class SensorDataProcessor(object):
 
     @inlineCallbacks
     def parseRawDatum(self, rawDatum):
-        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer)
-        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time)
+        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer, rawDatum.getShortUUID())
+        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time, rawDatum.getShortUUID())
         returnValue(readingDatum)
 
 
@@ -57,52 +54,39 @@ class SensorDataProcessor(object):
 class NRF24DataTransformer(object):
     log = Log().buildLogger()
 
-    def __init__(self, uid):
-        self._uid = uid
+    def convertBufferToUnicode(self, buffer, uuid):
+        self.log.debug(uuid + ": convertBufferToUnicode")
+        self.log.debug(uuid + ": Buffer: {buffer}", buffer=buffer)
+        return defer.execute(self._convertBufferToUnicode, buffer, uuid)
 
-    def convertBufferToUnicode(self, buffer):
-        self.log.debug(self._uid + ": convertBufferToUnicode")
-        self.log.debug(self._uid + ": Buffer: {buffer}", buffer=buffer)
-        return defer.execute(self._convertBufferToUnicode, buffer)
-
-    def _convertBufferToUnicode(self, buffer):
+    def _convertBufferToUnicode(self, buffer, uuid):
         unicodeText = ""
         for n in buffer:
             # Decode into standard unicode set
             if (n >= 32 and n <= 126):
                 unicodeText += chr(n)
             elif (n != 0):
-                self.log.warn(self._uid + ": character outside of unicode range: " + str(n));
+                self.log.warn(uuid + ": character outside of unicode range: " + str(n));
 
-        self.log.debug("message received: " + unicodeText)
+        self.log.debug(uuid + ": message received: " + unicodeText)
         return unicodeText
 
 # Parse incoming sensor data into a dictionary of values
 class SensorDataParser(object):
     log = Log().buildLogger()
 
-    def __init__(self, uid):
-        self._uid = uid
+    def convertMessageToDTO(self, message, timestamp, uuid):
+        self.log.debug(uuid + ": convertMessageToDTO")
+        return defer.execute(self._convertMessageToDTO, message, timestamp, uuid)
 
-    def convertMessageToDTO(self, message, timestamp):
-        self.log.debug(self._uid + ": convertMessageToPostBody")
-        return defer.execute(self._convertMessageToDTO, message, timestamp)
-
-    def _convertMessageToDTO(self, message, timestamp):
+    def _convertMessageToDTO(self, message, timestamp, uuid):
         if message.count('::') > 1:
             words = message.split("::")
-            self.log.debug(self._uid + ": split message: " + str(words))
-        #deviceId, sensorId, reading, time
-        datum = SensorReadingDTO(words[0], words[1], words[2], timestamp)
-        return datum
+            self.log.debug(uuid + ": split message: " + str(words))
+        #deviceId, sensorId, reading, time, rawUuid
+        dto = SensorReadingDTO(words[0], words[1], words[2], timestamp, uuid)
+        return dto
 
-# small DTO
-class SensorReadingDTO(object):
-    def __init__(self, deviceId, sensorId, reading, time):
-        self.deviceId = deviceId
-        self.sensorId = sensorId
-        self.reading = reading
-        self.time = time
 
 class IProcessor(Interface):
     def process(messageList):
@@ -115,18 +99,30 @@ class WebServiceProcessor(object):
 
     #single reading: POST /api/devices/<device_id>/sensors/<sensor_id>/readings?api_key=<key>
     #multiple readings: POST /api/readings?api_key=<key>
-
-    def __init__(self, uid):
-        self._uid = uid
+    @inlineCallbacks
+    def process(self, resultingData):
+        """ convert messagelist into a post for a web service """
+        yield self.batchProcessSensorData(resultingData)
 
     @inlineCallbacks
-    def process(self, messageList):
-        """ convert messagelist into a post for a web service """
-        yield defer.execute(self.log.debug, "process")
+    def batchProcessSensorData(self, resultingData):
+        self.log.debug("batchProcessSensorData")
+        dtoL = []
+        for dto in resultingData:
+            dtoL.append(convertToDict(dto))
+        try:
+            resp = yield treq.post('https://httpbin.org/post',
+                                   json.dumps(dtoL),
+                                   headers={'Content-Type': ['application/json']},
+                                   timeout=5)
+            yield self.processResponses(resp)
+            returnValue(resp)
+        except Exception as err:
+            self.log.error(err)
 
 
     def processSinglePost(self, postBody):
-        self.log.debug(self._uid + ": postMessageToServer")
+        self.log.debug("postMessageToServer")
         try:
             resp = yield treq.post('https://httpbin.org/post',
                                    json.dumps(postBody),
@@ -139,7 +135,7 @@ class WebServiceProcessor(object):
 
     @inlineCallbacks
     def processResponses(self, response):
-        self.log.debug(self._uid + ": processServerResponse")
+        self.log.debug("processServerResponse")
         try:
             json = yield response.json();
             defer.execute(self._printResponse, json)
@@ -149,21 +145,7 @@ class WebServiceProcessor(object):
 
     def _printResponse(self, responseJson):
         jsonDump = json.dumps(responseJson, sort_keys=True, indent=4, separators=(',', ': '))
-        #self.log.debug(self._uid + ": " + "Response: " + jsonDump)
-
-#broacaster has a series of processing objects
-#when a new datum is passed in, it creates a deferred list of those processing objects
-#final processing for that datum is considered complete when all processors have completed
-#^^^ is that necessary? Who cares if any fail?
-
-#consider a queue for database stuff. We are inserting large amounts.
-#need to queue up a batch instead of inserting all at once
-#does the same apply to web requests? Should we be sending single
-#requests for each device/sensor, or sending off a batch?
-#the former means each item gets stored, the latter means
-#far less CPU and network intensive operations
-#which could be great for a Raspberry pi
-
+        self.log.debug("Response: " + jsonDump)
 
 # database holder for sensor
 @implementer(IProcessor)
@@ -187,12 +169,12 @@ class DatabaseProcessor:
             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
             values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value'])
 
-            self._conn = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
+            conn = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
             yield self._conn.runOperation(dml, values)
         except Exception as err:
             self.log.error(err)
         finally:
-            self._conn.close()
+            conn.close()
             returnValue(True)
 
 
