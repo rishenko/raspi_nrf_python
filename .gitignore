@@ -2,3 +2,4 @@ requests
 *.pyc
 __pycache__/
 pynrf24/
+_trial_temp/

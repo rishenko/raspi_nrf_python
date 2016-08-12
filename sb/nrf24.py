@@ -3,7 +3,8 @@
 #
 
 
-# This file lib_nrf24.py is a slightly tweaked version of Barraca's "pynrf24".
+# This file is tweaked version of lib_nrf24.py, which
+# is a slightly tweaked version of Barraca's "pynrf24".
 
 # So this is my tweak for Raspberry Pi and "Virtual GPIO" ...
 #       ... of Barraca's port to BeagleBone python ...  (Joao Paulo Barraca <jpbarraca@gmail.com>)
@@ -29,7 +30,7 @@ import time
 
 if __name__ == '__main__':
     print (sys.argv[0], 'is an importable module:')
-    print ("...  from", sys.argv[0], "import lib_nrf24")
+    print ("...  from", sys.argv[0], "import nrf24")
     print ("")
 
     exit()
@@ -180,12 +181,14 @@ class NRF24(object):
     GPIO = None
     spidev = None
 
-    def __init__(self, gpio, spidev):
+    def __init__(self):
+        import RPi.GPIO as GPIO
+        import spidev
         # It should be possible to instantiate multiple objects, with different GPIO / spidev
         # EG on Raspberry, one could be RPI GPIO & spidev module, other could be virtual-GPIO
         # On rpi, only bus 0 is supported here, not bus 1 of the model B plus
-        self.GPIO = gpio   # the GPIO module
-        self.spidev = spidev # the spidev object/instance
+        self.GPIO = GPIO   # the GPIO module
+        self.spidev = spidev.SpiDev() # the spidev object/instance
         self.channel = 76
         self.data_rate = NRF24.BR_1MBPS
         self.wide_band = False # 2Mbs data rate in use?
@@ -430,6 +433,7 @@ class NRF24(object):
         if self.spidev:
             self.spidev.close()
             self.spidev = None
+        self.GPIO.cleanup()
 
     def startListening(self):
         self.write_register(NRF24.CONFIG, self.read_register(NRF24.CONFIG) | _BV(NRF24.PWR_UP) | _BV(NRF24.PRIM_RX))
