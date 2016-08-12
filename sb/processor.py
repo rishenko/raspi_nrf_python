@@ -30,7 +30,7 @@ class SensorDataProcessor(object):
     @inlineCallbacks
     def processQueue(self):
         if self._readingsQueue.qsize() < self.QUEUE_SIZE:
-            self._log.debug("queue size is less than " + str(QUEUE_SIZE))
+            self._log.debug("queue size is less than " + str(self.QUEUE_SIZE))
             returnValue(False)
 
         queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)

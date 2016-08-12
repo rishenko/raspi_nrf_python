@@ -2,7 +2,7 @@ import threading, Queue
 from sb import util, radio, collector, processor
 from sb.radio import NRF24Radio
 from sb.collector import SensorDataCollector
-from sb.processor import SensorDataProcessor
+from sb.processor import SensorDataProcessor, WebServiceProcessor, DatabaseProcessor
 
 from twisted.internet import reactor, task
 from sb.util import Log
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     processorList = []
     processorList.append(WebServiceProcessor())
     processorList.append(DatabaseProcessor())
-    processor = SensorDataProcessor(readingsQueue)
+    processor = SensorDataProcessor(readingsQueue, processorList)
     globalLog.info("DataPocessor created")
 
     globalLog.info("About to start collector task")
