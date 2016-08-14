@@ -13,16 +13,12 @@ class SensorDataCollector(object):
         return self._readingsQueue
 
     def listenForData(self):
-        if self._radio.irqCheck():
-            #self._log.debug("radio not available")
-            return
-
         self._log.info("listenForData start")
 
         while self._radio.available(0):
-            self._log.info("radio is available, processing")
+            self._log.info("radio is available - processing")
             buffer = self._radio.readMessageToBuffer()
             rd = RawSensorReadingDTO(buffer, time.time())
             self._readingsQueue.put(rd)
 
-            self._log.info("listenForData end")
+        self._log.info("listenForData end")

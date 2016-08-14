@@ -16,6 +16,7 @@ class NRF24Radio(NRF24):
                  [0xF0, 0xF0, 0xF0, 0xF0, 0xE1]] # reading address - sensors write to this
 
         self._gpio.setup(NRF24Radio.IRQ_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        self._gpio.add_event_detect(NRF24Radio.IRQ_PIN, GPIO.FALLING)
 
         super(NRF24Radio, self).__init__()
         self.begin(0, 17)
@@ -35,8 +36,11 @@ class NRF24Radio(NRF24):
     def listen(self):
         self.startListening()
 
-    def irqCheck(self):
-        return self._gpio.input(NRF24Radio.IRQ_PIN)
+    def irqTriggered(self):
+        return not self._gpio.event_detected(NRF24Radio.IRQ_PIN)
+
+    def irqCallback(self, callback):
+        self._gpio.add_event_callback(NRF24Radio.IRQ_PIN, callback)
 
     def readMessageToBuffer(self):
         receivedMessage = []
