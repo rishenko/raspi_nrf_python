@@ -1,7 +1,7 @@
 import sys, threading, os
 from twisted.logger import (
-	Logger, textFileLogObserver, FilteringLogObserver,
-	LogLevel, LogLevelFilterPredicate
+    Logger, textFileLogObserver, FilteringLogObserver,
+    LogLevel, LogLevelFilterPredicate
 )
 
 class Log(object):
