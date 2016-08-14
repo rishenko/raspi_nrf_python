@@ -1,4 +1,5 @@
 requests
+*.log
 *.pyc
 __pycache__/
 pynrf24/

@@ -22,7 +22,7 @@ if __name__ == "__main__":
     readingsQueue = Queue.Queue()
     globalLog.info("Queue created")
 
-    controller = SensorDataCollector(radio, readingsQueue)
+    collector = SensorDataCollector(radio, readingsQueue)
     globalLog.info("Collector created")
 
     processorList = []
@@ -31,9 +31,7 @@ if __name__ == "__main__":
     processor = SensorDataProcessor(readingsQueue, processorList)
     globalLog.info("DataPocessor created")
 
-    globalLog.info("About to start collector task")
-    loop = task.LoopingCall(controller.listenForData)
-    loop.start(.05)
+    radio.irqCallback(lambda _: reactor.callFromThread(collector.listenForData))
 
     globalLog.info("About to start proecssor task")
     loop = task.LoopingCall(processor.processQueue)

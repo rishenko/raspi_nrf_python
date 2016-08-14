@@ -1,4 +1,4 @@
-import sys
+import sys, threading, os
 from twisted.logger import (
 	Logger, textFileLogObserver, FilteringLogObserver,
 	LogLevel, LogLevelFilterPredicate
@@ -9,9 +9,27 @@ class Log(object):
     def buildLogger(self):
         LOG_LEVEL = LogLevel.debug
         observer = textFileLogObserver(sys.stdout)
-        filteringObs = FilteringLogObserver(observer,
+        filteringObs = LowLevelFilteringLogObserver(observer,
                                             [LogLevelFilterPredicate(defaultLogLevel=LOG_LEVEL)])
         return Logger(observer=filteringObs)
+
+
+class LowLevelFilteringLogObserver(FilteringLogObserver):
+    """ A filtering log observer that tacks on pid/thread info. """
+    def __init__(
+                self, observer, predicates,
+                        negativeObserver=lambda event: None
+                ):
+        super(LowLevelFilteringLogObserver, self).__init__(
+                    observer, predicates, negativeObserver)
+
+    def __call__(self, event):
+        if event['log_format'] and isinstance(event, dict):
+            event['log_format'] = lowLevelDetailsStr() + event['log_format']
+        else:
+            event.update(lowLevelDetails())
+
+        super(LowLevelFilteringLogObserver, self).__call__(event)
 
 # iterate over a Queue.Queue
 def iter_except(func, exception, first=None):
@@ -38,6 +56,18 @@ def iter_except(func, exception, first=None):
         pass
 
 def convertToDict(obj):
+    """ convert an object to a dict """
     d = {}
     d.update(obj.__dict__)
     return d
+
+def lowLevelDetailsStr():
+    """ convert lowLevelDetails into a simple string """
+    detail = lowLevelDetails()
+    return "pid/thread: " + detail["pid"] + "/" + detail["thread_id"] + " :: "
+
+def lowLevelDetails():
+    """ gather details about the process pid and thread of the calling operation """
+    threadid = str(threading.current_thread().ident)
+    pid = str(os.getpid())
+    return {"thread_id":threadid, "pid":pid}
