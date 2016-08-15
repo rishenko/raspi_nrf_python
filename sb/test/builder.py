@@ -9,12 +9,7 @@ def buildRangedOrdLists(callback, count, maxDeviceId, maxSensorId, maxReading, s
         callback(ordlist)
 
 def buildOrdList(deviceId, sensorId, reading, separator="::"):
-    deviceIdL = stringToOrds(deviceId)
-    sensorIdL = stringToOrds(sensorId)
-    readingL = stringToOrds(reading)
-    sepL = stringToOrds(separator)
-    buffer = deviceIdL + sepL + sensorIdL + sepL + readingL +  [0]
-    return buffer
+    return stringToOrds(str(deviceId) + separator + str(sensorId) + separator + str(reading)) + [0]
 
 def stringToOrds(message):
     return map(ord, list(str(message)))

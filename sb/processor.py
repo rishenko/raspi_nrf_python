@@ -34,8 +34,8 @@ class SensorDataProcessor(object):
             returnValue(False)
 
         queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
-        convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
-        resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
+        resultingData = yield defer.execute(map, self.parseRawDatum, queueIter)
+
         processorTasks = []
         for processor in self._processorList:
             d = processor.process(resultingData)
@@ -57,19 +57,16 @@ class NRF24DataTransformer(object):
     def convertBufferToUnicode(self, buffer, uuid):
         self.log.debug(uuid + ": convertBufferToUnicode")
         self.log.debug(uuid + ": Buffer: {buffer}", buffer=buffer)
-        return defer.execute(self._convertBufferToUnicode, buffer, uuid)
+        return "".join(self._convertSingleToUnicode(i, uuid) for i in buffer)
 
-    def _convertBufferToUnicode(self, buffer, uuid):
-        unicodeText = ""
-        for n in buffer:
+    def _convertSingleToUnicode(self, n, uuid):
             # Decode into standard unicode set
             if (n >= 32 and n <= 126):
-                unicodeText += chr(n)
+                return chr(n)
             elif (n != 0):
                 self.log.warn(uuid + ": character outside of unicode range: " + str(n));
 
-        self.log.debug(uuid + ": message received: " + unicodeText)
-        return unicodeText
+            return ""
 
 # Parse incoming sensor data into a dictionary of values
 class SensorDataParser(object):
@@ -80,11 +77,12 @@ class SensorDataParser(object):
         return defer.execute(self._convertMessageToDTO, message, timestamp, uuid)
 
     def _convertMessageToDTO(self, message, timestamp, uuid):
+        dto = None
         if message.count('::') > 1:
-            words = message.split("::")
+            words = message.split("::", 4) #only three words, so split to that, have the extra go away
             self.log.debug(uuid + ": split message: " + str(words))
-        #deviceId, sensorId, reading, time, rawUuid
-        dto = SensorReadingDTO(words[0], words[1], words[2], timestamp, uuid)
+            #deviceId, sensorId, reading, time, rawUuid
+            dto = SensorReadingDTO(words[0], words[1], words[2], timestamp, uuid)
         return dto
 
 
