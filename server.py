@@ -31,11 +31,13 @@ if __name__ == "__main__":
     processor = SensorDataProcessor(readingsQueue, processorList)
     globalLog.info("DataPocessor created")
 
+    collector.addConsumer(processor)
+
     radio.irqCallback(lambda _: reactor.callFromThread(collector.listenForData))
 
-    globalLog.info("About to start proecssor task")
-    loop = task.LoopingCall(processor.processQueue)
-    loop.start(5)
+    #globalLog.info("About to start proecssor task")
+    #loop = task.LoopingCall(processor.processQueue)
+    #loop.start(5)
 
     globalLog.info("About to start the application server")
 

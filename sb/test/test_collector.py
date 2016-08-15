@@ -1,7 +1,9 @@
 from twisted.internet import reactor, defer, task
+from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.trial import unittest
 import Queue
 from sb.collector import SensorDataCollector
+from sb.processor import SensorDataProcessor
 from sb.util import Log, iter_except
 import sb.test.builder as builder
 
@@ -24,6 +26,16 @@ class FakeRadio(object):
         buffer = builder.buildOrdList(1, 2, self._availableCount)
         return buffer;
 
+from zope.interface import implementer
+
+#@implementer(IProcessor)
+class FakeProcessor(object):
+    log = Log().buildLogger()
+
+    @inlineCallbacks
+    def consume(self, resultingData):
+        yield defer.execute(str, resultingData)
+
 class CollectorTests(unittest.TestCase):
 
     def test_SensorDataCollector(self):
@@ -32,5 +44,15 @@ class CollectorTests(unittest.TestCase):
         collector = SensorDataCollector(radio, queue)
         collector.listenForData()
         self.assertEquals(collector.getReadings().qsize(), 5)
-        for item in iter_except(queue.get_nowait, Queue.Empty):
-            print(str(item.__dict__))
+
+    def test_SensorDataCollectorProcess(self):
+        radio = FakeRadio(False, 5)
+        queue = Queue.Queue()
+        collector = SensorDataCollector(radio, queue)
+
+        processor = SensorDataProcessor(queue)
+        processor.addConsumer(FakeProcessor())
+
+        collector.addConsumer(processor)
+
+        collector.listenForData()

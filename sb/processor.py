@@ -21,11 +21,11 @@ class SensorDataProcessor(object):
 
     QUEUE_SIZE=10
 
-    def __init__(self, queue, processorList):
+    def __init__(self, queue):
         self._readingsQueue = queue
         self._transformer = NRF24DataTransformer()
         self._dataParser = SensorDataParser()
-        self._processorList = processorList
+        self._consumers = []
 
     @inlineCallbacks
     def processQueue(self):
@@ -37,18 +37,39 @@ class SensorDataProcessor(object):
         convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
         resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
 
-        processorTasks = []
-        for processor in self._processorList:
-            d = processor.process(resultingData)
-            processorTasks.append(d)
+        consumerTasks = []
+        for consumer in self._consumers:
+            d = consumer.consume(resultingData)
+            consumerTasks.append(d)
 
-        returnValue(processorTasks)
+        returnValue(consumerTasks)
 
     @inlineCallbacks
     def parseRawDatum(self, rawDatum):
         unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer, rawDatum.getShortUUID())
         readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time, rawDatum.getShortUUID())
         returnValue(readingDatum)
+
+    @inlineCallbacks
+    def consume(self, readingDatum):
+        processedDatum = yield self.parseRawDatum(readingDatum)
+        yield self.produce(processedDatum)
+
+    @inlineCallbacks
+    def produce(self, data):
+        consumerDeferreds = yield [x.consume(data) for x in self._consumers]
+        results = yield defer.gatherResults(consumerDeferreds, consumeErrors=True)
+        returnValue(results)
+
+    def addConsumer(self, consumer):
+        if consumer is not None:
+            self._consumers.append(consumer)
+        else:
+            log.warn("can't add a None consumer")
+
+    def removeConsumer(self, consumer):
+        if consumer in self._consumers:
+            self._consumers.remove(consumer)
 
 
 # Handle the transformation of incoming data from NRF24 transceivers
@@ -99,7 +120,7 @@ class WebServiceProcessor(object):
     #single reading: POST /api/devices/<device_id>/sensors/<sensor_id>/readings?api_key=<key>
     #multiple readings: POST /api/readings?api_key=<key>
     @inlineCallbacks
-    def process(self, resultingData):
+    def consume(self, readingDatum):
         """ convert messagelist into a post for a web service """
         yield self.batchProcessSensorData(resultingData)
 
@@ -155,10 +176,10 @@ class DatabaseProcessor:
         self.dataToInsert = defer.DeferredQueue()
 
     @inlineCallbacks
-    def process(self, dataList):
+    def consume(self, readingDatum):
         """ process list into database transaction """
         #yield defer.execute(self.log.debug, "process")
-        yield self.batchProcessSensorData(dataList)
+        yield self.batchProcessSensorData([readingDatum])
 
     @inlineCallbacks
     def processSensorData(self, data):

@@ -7,7 +7,7 @@ from twisted.logger import (
 class Log(object):
     # quick twisted logger builder
     def buildLogger(self):
-        LOG_LEVEL = LogLevel.warn
+        LOG_LEVEL = LogLevel.debug
         observer = textFileLogObserver(sys.stdout)
         filteringObs = LowLevelFilteringLogObserver(observer,
                                             [LogLevelFilterPredicate(defaultLogLevel=LOG_LEVEL)])

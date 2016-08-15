@@ -1,4 +1,5 @@
 from twisted.internet import reactor, defer, task
+from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.trial import unittest
 import time, Queue
 from sb.processor import SensorDataProcessor, WebServiceProcessor, DatabaseProcessor, IProcessor
@@ -8,15 +9,12 @@ import sb.test.builder as builder
 
 from zope.interface import implementer
 
-@implementer(IProcessor)
 class FakeProcessor(object):
     log = Log().buildLogger()
 
-    def __init__(self, reactor):
-        self._reactor = reactor
-
-    def process(self, resultingData):
-        self._reactor.stop()
+    @inlineCallbacks
+    def consume(self, resultingData):
+        yield defer.execute(str, resultingData)
 
 class ProcessorTests(unittest.TestCase):
 
@@ -28,12 +26,10 @@ class ProcessorTests(unittest.TestCase):
     def test_SensorDataProcessor(self):
         queue = Queue.Queue()
         self.buildRawSensorReadingDTOs(queue, 50)
-        self._processorList = []
-        self._processorList.append(FakeProcessor(reactor))
-        #self._processorList.append(WebServiceProcessor())
-        #self._processorList.append(DatabaseProcessor())
 
-        processor = SensorDataProcessor(queue, self._processorList)
+        processor = SensorDataProcessor(queue)
+        processor.addConsumer(FakeProcessor())
+        #processor.addConsumer(WebServiceProcessor())
+        #processor.addConsumer(DatabaseProcessor())
 
-        reactor.callWhenRunning(processor.processQueue)
-        reactor.run()
+        processor.processQueue()
