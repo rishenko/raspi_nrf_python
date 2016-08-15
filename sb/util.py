@@ -7,7 +7,7 @@ from twisted.logger import (
 class Log(object):
     # quick twisted logger builder
     def buildLogger(self):
-        LOG_LEVEL = LogLevel.debug
+        LOG_LEVEL = LogLevel.warn
         observer = textFileLogObserver(sys.stdout)
         filteringObs = LowLevelFilteringLogObserver(observer,
                                             [LogLevelFilterPredicate(defaultLogLevel=LOG_LEVEL)])
@@ -24,10 +24,10 @@ class LowLevelFilteringLogObserver(FilteringLogObserver):
                     observer, predicates, negativeObserver)
 
     def __call__(self, event):
-        if event['log_format'] and isinstance(event, dict):
-            event['log_format'] = lowLevelDetailsStr() + event['log_format']
-        else:
-            event.update(lowLevelDetails())
+        #if event['log_format'] and isinstance(event, dict):
+        #    event['log_format'] = lowLevelDetailsStr() + event['log_format']
+        #else:
+        event.update(lowLevelDetails())
 
         super(LowLevelFilteringLogObserver, self).__call__(event)
 

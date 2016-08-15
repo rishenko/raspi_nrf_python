@@ -34,7 +34,8 @@ class SensorDataProcessor(object):
             returnValue(False)
 
         queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
-        resultingData = yield defer.execute(map, self.parseRawDatum, queueIter)
+        convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
+        resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
 
         processorTasks = []
         for processor in self._processorList:
