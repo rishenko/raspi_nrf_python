@@ -19,25 +19,16 @@ if __name__ == "__main__":
     radio = NRF24Radio()
     radio.listen()
 
-    readingsQueue = Queue.Queue()
-    globalLog.info("Queue created")
-
-    collector = SensorDataCollector(radio, readingsQueue)
+    collector = SensorDataCollector(radio)
     globalLog.info("Collector created")
 
-    processorList = []
-    processorList.append(WebServiceProcessor())
-    processorList.append(DatabaseProcessor())
-    processor = SensorDataProcessor(readingsQueue, processorList)
-    globalLog.info("DataPocessor created")
+    processor = SensorDataProcessor()
+    processor.addConsumer(WebServiceProcessor())
+    processor.addConsumer(DatabaseProcessor())
 
     collector.addConsumer(processor)
 
     radio.irqCallback(lambda _: reactor.callFromThread(collector.listenForData))
-
-    #globalLog.info("About to start proecssor task")
-    #loop = task.LoopingCall(processor.processQueue)
-    #loop.start(5)
 
     globalLog.info("About to start the application server")
 

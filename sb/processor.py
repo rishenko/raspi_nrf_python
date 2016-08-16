@@ -102,7 +102,7 @@ class WebServiceProcessor(object):
     @inlineCallbacks
     def consume(self, readingDatum):
         """ convert messagelist into a post for a web service """
-        yield self.batchProcessSensorData(resultingData)
+        yield self.processSinglePost(readingDatum)
 
     @inlineCallbacks
     def batchProcessSensorData(self, resultingData):
@@ -159,7 +159,7 @@ class DatabaseProcessor:
     def consume(self, readingDatum):
         """ process list into database transaction """
         #yield defer.execute(self.log.debug, "process")
-        yield self.batchProcessSensorData([readingDatum])
+        yield self.processSensorData(readingDatum)
 
     @inlineCallbacks
     def processSensorData(self, data):
@@ -167,15 +167,14 @@ class DatabaseProcessor:
         try:
             conn = txpostgres.Connection()
             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
-            values = (data['uuid'], 'deviceXname', 'sensorXid', data['sensor'], data['value'])
+            values = (data.deviceId, 'deviceXname', 'sensorXid', data.sensorId, data.reading)
 
             conn = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
-            yield self._conn.runOperation(dml, values)
+            yield conn.runOperation(dml, values)
         except Exception as err:
             self.log.error(err)
         finally:
             conn.close()
-            returnValue(True)
 
 
     @inlineCallbacks
