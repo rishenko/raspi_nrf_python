@@ -40,17 +40,15 @@ class CollectorTests(unittest.TestCase):
 
     def test_SensorDataCollector(self):
         radio = FakeRadio(False, 5)
-        queue = Queue.Queue()
-        collector = SensorDataCollector(radio, queue)
+        collector = SensorDataCollector(radio)
         collector.listenForData()
-        self.assertEquals(collector.getReadings().qsize(), 5)
 
     def test_SensorDataCollectorProcess(self):
         radio = FakeRadio(False, 5)
         queue = Queue.Queue()
-        collector = SensorDataCollector(radio, queue)
+        collector = SensorDataCollector(radio)
 
-        processor = SensorDataProcessor(queue)
+        processor = SensorDataProcessor()
         processor.addConsumer(FakeProcessor())
 
         collector.addConsumer(processor)

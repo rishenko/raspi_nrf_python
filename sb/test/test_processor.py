@@ -27,9 +27,9 @@ class ProcessorTests(unittest.TestCase):
         queue = Queue.Queue()
         self.buildRawSensorReadingDTOs(queue, 50)
 
-        processor = SensorDataProcessor(queue)
+        processor = SensorDataProcessor()
         processor.addConsumer(FakeProcessor())
         #processor.addConsumer(WebServiceProcessor())
         #processor.addConsumer(DatabaseProcessor())
-
-        processor.processQueue()
+        iq = iter_except(queue.get_nowait, Queue.Empty)
+        [processor.consume(datum) for datum in iq]

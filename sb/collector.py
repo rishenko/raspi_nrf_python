@@ -7,13 +7,9 @@ from twisted.internet.defer import inlineCallbacks, returnValue
 class SensorDataCollector(object):
     _log = Log().buildLogger()
 
-    def __init__(self, radio, queue):
+    def __init__(self, radio):
         self._radio = radio
-        self._readingsQueue = queue
         self._consumers = []
-
-    def getReadings(self):
-        return self._readingsQueue
 
     @inlineCallbacks
     def listenForData(self):
@@ -24,7 +20,6 @@ class SensorDataCollector(object):
             self._log.info("radio is available - processing")
             buffer = self._radio.readMessageToBuffer()
             rd = RawSensorReadingDTO(buffer, time.time())
-            self._readingsQueue.put(rd)
             results.append(self.produce(rd))
 
         self._log.info("listenForData end")

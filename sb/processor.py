@@ -19,35 +19,15 @@ from zope.interface import Interface, implementer
 class SensorDataProcessor(object):
     _log = Log().buildLogger()
 
-    QUEUE_SIZE=10
-
-    def __init__(self, queue):
-        self._readingsQueue = queue
+    def __init__(self):
         self._transformer = NRF24DataTransformer()
         self._dataParser = SensorDataParser()
         self._consumers = []
 
     @inlineCallbacks
-    def processQueue(self):
-        if self._readingsQueue.qsize() < self.QUEUE_SIZE:
-            self._log.debug("queue size is less than " + str(self.QUEUE_SIZE))
-            returnValue(False)
-
-        queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
-        convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
-        resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
-
-        consumerTasks = []
-        for consumer in self._consumers:
-            d = consumer.consume(resultingData)
-            consumerTasks.append(d)
-
-        returnValue(consumerTasks)
-
-    @inlineCallbacks
     def parseRawDatum(self, rawDatum):
-        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer, rawDatum.getShortUUID())
-        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time, rawDatum.getShortUUID())
+        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer, rawDatum.uuid)
+        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time, rawDatum.uuid)
         returnValue(readingDatum)
 
     @inlineCallbacks
@@ -219,3 +199,24 @@ class DatabaseProcessor:
              dml += ' values (%s, %s, %s, %s, %s)'
              values = (datum.deviceId, 'deviceXname', 'sensorXid', datum.sensorId, datum.reading)
              yield cur.execute(dml, values)
+
+class QueueDataProcessor(object):
+    def __init__(self, queue):
+        self._readingsQueue = queue
+
+    @inlineCallbacks
+    def processQueue(self):
+        if self._readingsQueue.qsize() < self.QUEUE_SIZE:
+            self._log.debug("queue size is less than " + str(self.QUEUE_SIZE))
+            returnValue(False)
+
+        queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
+        convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
+        resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
+
+        consumerTasks = []
+        for consumer in self._consumers:
+            d = consumer.consume(resultingData)
+            consumerTasks.append(d)
+
+        returnValue(consumerTasks)
