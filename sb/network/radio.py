@@ -4,13 +4,18 @@ from twisted.protocols.basic import LineReceiver
 from twisted.internet import reactor, defer
 from twisted.internet.defer import inlineCallbacks, returnValue
 
+from sb.util import Log
+
 class NRFProtocolFactory(Factory):
+    log = Log().buildLogger()
+
     def __init__(self):
         self._protocols = []
 
-    def buildProtocol(self):
-        protocol = NRFProtocol()
+    def buildProtocol(self, address):
+        protocol = NRFProtocol(self)
         self._protocols.append(protocol)
+        self.log.info("building a protocol for: " + str(address))
         return protocol
 
     @inlineCallbacks
@@ -19,15 +24,28 @@ class NRFProtocolFactory(Factory):
 
     @inlineCallbacks
     def broadcast(self, datum):
-        results = yield [p.sendLine(str(datum)) for p in self._protocols]
+        self.log.debug("broadcasting")
+        results = yield [p.sendLine(self.datumToString(datum)) for p in self._protocols]
         returnValue(results)
 
+    def datumToString(self, datum):
+        msg = datum.buffer + [datum.time] + [datum.uuid]
+        return str(msg).replace(" ", "")
+
 class NRFProtocol(LineReceiver):
+    log = Log().buildLogger()
+
+    def __init__(self, factory):
+        self.factory = factory
+
     def connectionMade(self):
+        self.log.info("connected")
         self.sendLine("CONNECT OK")
 
-    def connectionLost(self):
+    def connectionLost(self, reason):
         """ alert the factory to a lost connection """
+        self.factory._protocols.remove(self)
+        self.log.info("connection lost: " + str(reason))
 
     def lineReceived(self):
         """ this can be expanded as new features are added """
