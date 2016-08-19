@@ -29,7 +29,7 @@ class NRFProtocolFactory(Factory):
         returnValue(results)
 
     def datumToString(self, datum):
-        msg = datum.buffer + [datum.time] + [datum.uuid]
+        msg = json.dumps(datum, default=lambda d: d.json_serialize())
         return str(msg).replace(" ", "")
 
 class NRFProtocol(LineReceiver):

@@ -13,8 +13,31 @@ from twisted.logger import (
     Logger, textFileLogObserver, FilteringLogObserver,
     LogLevel, LogLevelFilterPredicate
 )
-
 from zope.interface import Interface, implementer
+
+class QueueDataProcessor(object):
+    def __init__(self, queue, processSize=20):
+        self._readingsQueue = queue
+        self._processSize = processSize
+        self._counter = -1
+
+    @inlineCallbacks
+    def consume(self, readingDatum):
+        self._readingsQueue.put_nowait(readingDatum)
+        if (self.readyToProcess()):
+            yield self.processQueue()
+
+    @inlineCallbacks
+    def processQueue(self):
+        """ implement """
+
+    def readyToProcess(self):
+        self._counter += 1
+        if (self._counter > self._processSize):
+            self._counter = 0
+            return True
+        else:
+            return False
 
 class SensorDataProcessor(object):
     _log = Log().buildLogger()
@@ -26,8 +49,8 @@ class SensorDataProcessor(object):
 
     @inlineCallbacks
     def parseRawDatum(self, rawDatum):
-        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer, rawDatum.uuid)
-        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum.time, rawDatum.uuid)
+        unicode = yield self._transformer.convertBufferToUnicode(rawDatum.buffer)
+        readingDatum = yield self._dataParser.convertMessageToDTO(unicode, rawDatum)
         returnValue(readingDatum)
 
     @inlineCallbacks
@@ -56,35 +79,33 @@ class SensorDataProcessor(object):
 class NRF24DataTransformer(object):
     log = Log().buildLogger()
 
-    def convertBufferToUnicode(self, buffer, uuid):
-        self.log.debug(uuid + ": convertBufferToUnicode")
-        self.log.debug(uuid + ": Buffer: {buffer}", buffer=buffer)
-        return "".join(self._convertSingleToUnicode(i, uuid) for i in buffer)
+    def convertBufferToUnicode(self, buffer):
+        return "".join(self._convertSingleToUnicode(i) for i in buffer)
 
-    def _convertSingleToUnicode(self, n, uuid):
-            # Decode into standard unicode set
-            if (n >= 32 and n <= 126):
-                return chr(n)
-            elif (n != 0):
-                self.log.warn(uuid + ": character outside of unicode range: " + str(n));
+    def _convertSingleToUnicode(self, n):
+        # Decode into standard unicode set
+        if (n >= 32 and n <= 126):
+            return chr(n)
+        elif (n != 0):
+            self.log.warn("character outside of unicode range: " + str(n));
 
-            return ""
+        return ""
 
 # Parse incoming sensor data into a dictionary of values
 class SensorDataParser(object):
     log = Log().buildLogger()
 
-    def convertMessageToDTO(self, message, timestamp, uuid):
-        self.log.debug(uuid + ": convertMessageToDTO")
-        return defer.execute(self._convertMessageToDTO, message, timestamp, uuid)
+    def convertMessageToDTO(self, message, datum):
+        self.log.debug(datum.uuid + ": convertMessageToDTO")
+        return defer.execute(self._convertMessageToDTO, message, datum)
 
-    def _convertMessageToDTO(self, message, timestamp, uuid):
+    def _convertMessageToDTO(self, message, datum):
         dto = None
         if message.count('::') > 1:
             words = message.split("::", 4) #only three words, so split to that, have the extra go away
-            self.log.debug(uuid + ": split message: " + str(words))
+            self.log.debug(datum.uuid + ": split message: " + str(words))
             #deviceId, sensorId, reading, time, rawUuid
-            dto = SensorReadingDTO(words[0], words[1], words[2], timestamp, uuid)
+            dto = SensorReadingDTO(words[0], words[1], words[2], datum.time, datum.uuid)
         return dto
 
 
@@ -149,17 +170,18 @@ class WebServiceProcessor(object):
 
 # database holder for sensor
 @implementer(IProcessor)
-class DatabaseProcessor:
+class DatabaseProcessor(QueueDataProcessor):
     log = Log().buildLogger()
 
-    def __init__(self):
+    def __init__(self, queue, processSize=20):
         self.dataToInsert = defer.DeferredQueue()
+        super(DatabaseProcessor, self).__init__(queue, processSize)
 
     @inlineCallbacks
-    def consume(self, readingDatum):
-        """ process list into database transaction """
-        #yield defer.execute(self.log.debug, "process")
-        yield self.processSensorData(readingDatum)
+    def processQueue(self):
+        queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
+        results = yield self.batchProcessSensorData(queueIter)
+        returnValue(results)
 
     @inlineCallbacks
     def processSensorData(self, data):
@@ -184,7 +206,7 @@ class DatabaseProcessor:
             conn = txpostgres.Connection()
             connDef = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
             results = yield conn.runInteraction(self._buildTransactionLoop, list)
-            self.log.info("batch database results: " + str(results))
+            self.log.info("batch database insertion")
             returnValue(results)
         except Exception as err:
             self.log.error(err)
@@ -198,24 +220,3 @@ class DatabaseProcessor:
              dml += ' values (%s, %s, %s, %s, %s)'
              values = (datum.deviceId, 'deviceXname', 'sensorXid', datum.sensorId, datum.reading)
              yield cur.execute(dml, values)
-
-class QueueDataProcessor(object):
-    def __init__(self, queue):
-        self._readingsQueue = queue
-
-    @inlineCallbacks
-    def processQueue(self):
-        if self._readingsQueue.qsize() < self.QUEUE_SIZE:
-            self._log.debug("queue size is less than " + str(self.QUEUE_SIZE))
-            returnValue(False)
-
-        queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
-        convertedDList = yield defer.execute(map, self.parseRawDatum, queueIter)
-        resultingData = yield defer.gatherResults(convertedDList, consumeErrors=True)
-
-        consumerTasks = []
-        for consumer in self._consumers:
-            d = consumer.consume(resultingData)
-            consumerTasks.append(d)
-
-        returnValue(consumerTasks)
