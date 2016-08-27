@@ -2,13 +2,15 @@ from sb.collector import SensorDataCollector
 from twisted.internet.protocol import ClientFactory
 from twisted.protocols.basic import LineReceiver
 from twisted.internet import reactor, defer
+from twisted.internet.protocol import ReconnectingClientFactory
 from twisted.internet.defer import inlineCallbacks, returnValue
 from sb import dto
 
 from sb.util import Log
 import ast
 
-class ReceivingProtocolFactory(ClientFactory):
+
+class ReceivingProtocolFactory(ReconnectingClientFactory, ClientFactory):
     log = Log().buildLogger()
 
     def __init__(self):
@@ -21,16 +23,25 @@ class ReceivingProtocolFactory(ClientFactory):
         self.log.info("building a protocol for: " + str(address))
         return protocol
 
+    def startedConnecting(self, connector):
+        self.log.info('Started to connect.')
+
     def clientConnectionLost(self, connector, reason):
-        """If we get disconnected, reconnect to server."""
-        connector.connect()
+        self.log.info('Lost connection. Reason: {}'.format(reason))
+        ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     def clientConnectionFailed(self, connector, reason):
-        self.log.info("connection failed:" + str(reason))
+        self.log.info('Connection failed. Reason: {}'.format(reason))
+        ReconnectingClientFactory.clientConnectionFailed(self, connector, reason)
 
     @inlineCallbacks
     def consume(self, datum):
         self.log.debug("consuming new data")
+        results = yield self.produce(datum);
+        returnValue(results)
+
+    @inlineCallbacks
+    def produce(self, datum):
         results = yield [c.consume(datum) for c in self._consumers]
         returnValue(results)
 

@@ -5,6 +5,7 @@ from twisted.internet import reactor, defer
 from twisted.internet.defer import inlineCallbacks, returnValue
 
 from sb.util import Log
+import json
 
 class NRFProtocolFactory(Factory):
     log = Log().buildLogger()

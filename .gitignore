@@ -1,5 +1,6 @@
 requests
 *.dat
+*.swp
 *.log
 *.pyc
 __pycache__/

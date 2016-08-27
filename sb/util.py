@@ -8,7 +8,7 @@ class Log(object):
     # quick twisted logger builder
     def buildLogger(self):
         LOG_LEVEL = LogLevel.debug
-        observer = textFileLogObserver(sys.stdout)
+        observer = textFileLogObserver(sys.stdout, "%Y-%m-%dT%H:%M:%S,%fZ%z")
         filteringObs = LowLevelFilteringLogObserver(observer,
                                             [LogLevelFilterPredicate(defaultLogLevel=LOG_LEVEL)])
         return Logger(observer=filteringObs)

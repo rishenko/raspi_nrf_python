@@ -15,7 +15,9 @@ from twisted.logger import (
 )
 from zope.interface import Interface, implementer
 
+
 class QueueDataProcessor(object):
+
     def __init__(self, queue, processSize=20):
         self._readingsQueue = queue
         self._processSize = processSize
@@ -38,6 +40,7 @@ class QueueDataProcessor(object):
             return True
         else:
             return False
+
 
 class SensorDataProcessor(object):
     _log = Log().buildLogger()
@@ -66,9 +69,10 @@ class SensorDataProcessor(object):
 
     def addConsumer(self, consumer):
         if consumer is not None:
+            self._log.info("adding a consumer: " + str(consumer.__class__))
             self._consumers.append(consumer)
         else:
-            log.warn("can't add a None consumer")
+            self._log.warn("can't add a None consumer")
 
     def removeConsumer(self, consumer):
         if consumer in self._consumers:
@@ -87,11 +91,13 @@ class NRF24DataTransformer(object):
         if (n >= 32 and n <= 126):
             return chr(n)
         elif (n != 0):
-            self.log.warn("character outside of unicode range: " + str(n));
+            self.log.warn("character outside of unicode range: " + str(n))
 
         return ""
 
 # Parse incoming sensor data into a dictionary of values
+
+
 class SensorDataParser(object):
     log = Log().buildLogger()
 
@@ -102,26 +108,32 @@ class SensorDataParser(object):
     def _convertMessageToDTO(self, message, datum):
         dto = None
         if message.count('::') > 1:
-            words = message.split("::", 4) #only three words, so split to that, have the extra go away
+            # only three words, so split to that, have the extra go away
+            words = message.split("::", 4)
             self.log.debug(datum.uuid + ": split message: " + str(words))
             #deviceId, sensorId, reading, time, rawUuid
-            dto = SensorReadingDTO(words[0], words[1], words[2], datum.time, datum.uuid)
+            dto = SensorReadingDTO(words[0], words[1], words[
+                                   2], datum.time, datum.uuid)
         return dto
 
 
 class IProcessor(Interface):
+
     def process(messageList):
         """ process the data in the list """
 
 # Broadcasts sensor data to any subscribers
+
+
 @implementer(IProcessor)
 class WebServiceProcessor(object):
     log = Log().buildLogger()
 
-    #single reading: POST /api/devices/<device_id>/sensors/<sensor_id>/readings?api_key=<key>
-    #multiple readings: POST /api/readings?api_key=<key>
+    # single reading: POST /api/devices/<device_id>/sensors/<sensor_id>/readings?api_key=<key>
+    # multiple readings: POST /api/readings?api_key=<key>
     @inlineCallbacks
     def consume(self, readingDatum):
+        self.log.info("consuming a datum")
         """ convert messagelist into a post for a web service """
         yield self.processSinglePost(readingDatum)
 
@@ -134,41 +146,45 @@ class WebServiceProcessor(object):
         try:
             resp = yield treq.post('https://httpbin.org/post',
                                    json.dumps(dtoL),
-                                   headers={'Content-Type': ['application/json']},
+                                   headers={
+                                       'Content-Type': ['application/json']},
                                    timeout=5)
             yield self.processResponses(resp)
             returnValue(resp)
         except Exception as err:
             self.log.error(err)
 
-
     def processSinglePost(self, postBody):
-        self.log.debug("postMessageToServer")
+        self.log.info("postMessageToServer")
         try:
             resp = yield treq.post('https://httpbin.org/post',
                                    json.dumps(postBody),
-                                   headers={'Content-Type': ['application/json']},
+                                   headers={
+                                       'Content-Type': ['application/json']},
                                    timeout=5)
+            self.log.debug(str(resp))
             returnValue(resp)
         except Exception as err:
             self.log.error(err)
-
 
     @inlineCallbacks
     def processResponses(self, response):
         self.log.debug("processServerResponse")
         try:
-            json = yield response.json();
+            json = yield response.json()
             defer.execute(self._printResponse, json)
             returnValue(json)
         except Exception as err:
             self.log.error(err)
 
     def _printResponse(self, responseJson):
-        jsonDump = json.dumps(responseJson, sort_keys=True, indent=4, separators=(',', ': '))
+        jsonDump = json.dumps(responseJson, sort_keys=True,
+                              indent=4, separators=(',', ': '))
         self.log.debug("Response: " + jsonDump)
 
 # database holder for sensor
+
+
 @implementer(IProcessor)
 class DatabaseProcessor(QueueDataProcessor):
     log = Log().buildLogger()
@@ -189,7 +205,8 @@ class DatabaseProcessor(QueueDataProcessor):
         try:
             conn = txpostgres.Connection()
             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value) values (%s, %s, %s, %s, %s)'
-            values = (data.deviceId, 'deviceXname', 'sensorXid', data.sensorId, data.reading)
+            values = (data.deviceId, 'deviceXname',
+                      'sensorXid', data.sensorId, data.reading)
 
             conn = yield conn.connect('dbname=sensor user=pi password=Obelisk1 host=localhost')
             yield conn.runOperation(dml, values)
@@ -197,7 +214,6 @@ class DatabaseProcessor(QueueDataProcessor):
             self.log.error(err)
         finally:
             conn.close()
-
 
     @inlineCallbacks
     def batchProcessSensorData(self, list):
@@ -216,7 +232,8 @@ class DatabaseProcessor(QueueDataProcessor):
     @inlineCallbacks
     def _buildTransactionLoop(self, cur, list):
         for datum in list:
-             dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value)'
-             dml += ' values (%s, %s, %s, %s, %s)'
-             values = (datum.deviceId, 'deviceXname', 'sensorXid', datum.sensorId, datum.reading)
-             yield cur.execute(dml, values)
+            dml = 'insert into sensor (deviceid, name, sensorid, sensortype, value)'
+            dml += ' values (%s, %s, %s, %s, %s)'
+            values = (datum.deviceId, 'deviceXname',
+                      'sensorXid', datum.sensorId, datum.reading)
+            yield cur.execute(dml, values)
