@@ -1,8 +1,8 @@
 import json
 import treq
-import util
-from util import Log, iter_except, convertToDict
-import Queue
+import sb.util
+from sb.util import Log, iter_except, convertToDict
+import queue
 from sb.dto import SensorReadingDTO, RawSensorReadingDTO
 
 from txpostgres import txpostgres
@@ -195,7 +195,7 @@ class DatabaseProcessor(QueueDataProcessor):
 
     @inlineCallbacks
     def processQueue(self):
-        queueIter = iter_except(self._readingsQueue.get_nowait, Queue.Empty)
+        queueIter = iter_except(self._readingsQueue.get_nowait, queue.Empty)
         results = yield self.batchProcessSensorData(queueIter)
         returnValue(results)
 

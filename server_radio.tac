@@ -1,4 +1,4 @@
-import threading, Queue
+import threading, queue
 from sb import util, radio, collector, processor
 from sb.radio import NRF24Radio
 from sb.collector import SensorDataCollector
@@ -37,3 +37,4 @@ globalLog.info("About to start the application server")
 internet.TCPServer(1025, factory, interface='192.168.1.68').setServiceParent(application)
 
 #Run with: twistd -noy server_radio.tac
+#For testing in P3, run python3 -m twisted.trial sb

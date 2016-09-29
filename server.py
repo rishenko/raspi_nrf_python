@@ -1,4 +1,4 @@
-import threading, Queue
+import threading, queue
 from sb import util, radio, collector, processor
 from sb.radio import NRF24Radio
 from sb.collector import SensorDataCollector

@@ -1,7 +1,7 @@
 from twisted.internet import reactor, defer, task
 from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.trial import unittest
-import Queue
+import queue
 from sb.collector import SensorDataCollector
 from sb.processor import SensorDataProcessor
 from sb.util import Log, iter_except
@@ -45,7 +45,6 @@ class CollectorTests(unittest.TestCase):
 
     def test_SensorDataCollectorProcess(self):
         radio = FakeRadio(False, 5)
-        queue = Queue.Queue()
         collector = SensorDataCollector(radio)
 
         processor = SensorDataProcessor()

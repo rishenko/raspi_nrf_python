@@ -31,7 +31,7 @@ class LowLevelFilteringLogObserver(FilteringLogObserver):
 
         super(LowLevelFilteringLogObserver, self).__call__(event)
 
-# iterate over a Queue.Queue
+# iterate over a queue.Queue
 def iter_except(func, exception, first=None):
     """ Call a function repeatedly until an exception is raised.
 
@@ -43,7 +43,7 @@ def iter_except(func, exception, first=None):
         iter_except(functools.partial(heappop, h), IndexError)   # priority queue iterator
         iter_except(d.popitem, KeyError)                         # non-blocking dict iterator
         iter_except(d.popleft, IndexError)                       # non-blocking deque iterator
-        iter_except(q.get_nowait, Queue.Empty)                   # loop over a producer Queue
+        iter_except(q.get_nowait, queue.Empty)                   # loop over a producer Queue
         iter_except(s.pop, KeyError)                             # non-blocking set iterator
 
     """

@@ -1,4 +1,4 @@
-import threading, Queue
+import threading, queue
 from sb import util, processor
 from sb.network.receiving import ReceivingProtocolFactory, ReceivingProtocol
 from sb.network.websocket import SensorDataClientFactory, SensorDataClientProtocol
@@ -15,8 +15,8 @@ globalLog = Log().buildLogger()
 
 globalLog.info("Building Processor")
 dataProcessor = processor.SensorDataProcessor()
-dataProcessor.addConsumer(processor.DatabaseProcessor(Queue.Queue()))
-#dataProcessor.addConsumer(processor.WebServiceProcessor())
+dataProcessor.addConsumer(processor.DatabaseProcessor(queue.Queue()))
+dataProcessor.addConsumer(processor.WebServiceProcessor())
 
 globalLog.info("Building Protocols and Factories")
 recFactory = ReceivingProtocolFactory()
@@ -28,8 +28,8 @@ dataProcessor.addConsumer(wsFactory) # WS consumes processed reading objs
 globalLog.info("About to start the application server")
 application = service.Application("radio server")
 #internet.TCPClient('104.59.236.94', 1025, recFactory).setServiceParent(application)
-#internet.TCPClient('192.168.1.68', 1025, recFactory).setServiceParent(application)
-internet.TCPClient('192.168.1.148', 1025, recFactory).setServiceParent(application)
+internet.TCPClient('192.168.1.68', 1025, recFactory).setServiceParent(application)
+#internet.TCPClient('192.168.1.148', 1025, recFactory).setServiceParent(application)
 connectWS(wsFactory)
 
 #Run with: twistd -noy client_radio.tac

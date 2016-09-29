@@ -1,7 +1,7 @@
 from twisted.internet import reactor, defer, task
 from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.trial import unittest
-import time, Queue
+import time, queue
 from sb.processor import SensorDataProcessor, WebServiceProcessor, DatabaseProcessor, IProcessor
 from sb.util import Log, iter_except
 from sb.dto import RawSensorReadingDTO
@@ -18,18 +18,18 @@ class FakeProcessor(object):
 
 class ProcessorTests(unittest.TestCase):
 
-    def buildRawSensorReadingDTOs(self, queue, count=5):
-        log = Log().buildLogger()
-        func = lambda ord: queue.put(RawSensorReadingDTO(ord, time.time()))
-        builder.buildRangedOrdLists(func, 10000, 4, 2, 86)
-
     def test_SensorDataProcessor(self):
-        queue = Queue.Queue()
-        self.buildRawSensorReadingDTOs(queue, 50)
+        q = queue.Queue(maxsize=0)
+        self.buildRawSensorReadingDTOs(q, 50)
 
         processor = SensorDataProcessor()
         processor.addConsumer(FakeProcessor())
         #processor.addConsumer(WebServiceProcessor())
         #processor.addConsumer(DatabaseProcessor())
-        iq = iter_except(queue.get_nowait, Queue.Empty)
+        iq = iter_except(q.get_nowait, queue.Empty)
         [processor.consume(datum) for datum in iq]
+
+    def buildRawSensorReadingDTOs(self, q, count=5):
+        log = Log().buildLogger()
+        func = lambda ord: q.put(RawSensorReadingDTO(ord, time.time()))
+        builder.buildRangedOrdLists(func, 10000, 4, 2, 86)

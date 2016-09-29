@@ -26,7 +26,7 @@ class NRFProtocolFactory(Factory):
     @inlineCallbacks
     def broadcast(self, datum):
         self.log.debug("broadcasting")
-        results = yield [p.sendLine(self.datumToString(datum)) for p in self._protocols]
+        results = yield [p.sendLine(self.datumToString(datum).encode()) for p in self._protocols]
         returnValue(results)
 
     def datumToString(self, datum):
@@ -41,7 +41,7 @@ class NRFProtocol(LineReceiver):
 
     def connectionMade(self):
         self.log.info("connected")
-        self.sendLine("CONNECT OK")
+        self.sendLine("CONNECT OK".encode())
 
     def connectionLost(self, reason):
         """ alert the factory to a lost connection """

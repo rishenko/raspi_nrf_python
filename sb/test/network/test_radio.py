@@ -2,7 +2,7 @@ from twisted.internet import reactor, defer, task
 from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.trial import unittest
 from twisted.test import proto_helpers
-import Queue
+import queue
 from sb.collector import SensorDataCollector
 from sb.processor import SensorDataProcessor
 from sb.util import Log, iter_except
@@ -36,11 +36,11 @@ class TestNRFFactory(unittest.TestCase):
         self.collector.addConsumer(self.factory)
 
         self.tr = proto_helpers.StringTransport()
-        self.proto = self.factory.buildProtocol()
+        self.proto = self.factory.buildProtocol("127.0.0.1")
         self.proto.makeConnection(self.tr)
 
     def test_broadcast(self):
         self.collector.listenForData()
         print(self.tr.value())
-        self.assertEqual(self.tr.value(), "CONNECT OK\r\n")
+        self.assertTrue(self.tr.value().decode().startswith("CONNECT OK\r\n"))
         print(self.tr.value())

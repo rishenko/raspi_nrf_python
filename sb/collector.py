@@ -1,5 +1,5 @@
-import sys, time, threading, Queue, itertools
-from util import Log
+import sys, time, threading, queue, itertools
+from sb.util import Log
 from sb.dto import RawSensorReadingDTO
 from twisted.internet import reactor, task, defer, threads
 from twisted.internet.defer import inlineCallbacks, returnValue
